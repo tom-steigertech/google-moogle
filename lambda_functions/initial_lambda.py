@@ -87,16 +87,46 @@ def handler(event, context):
     }
 
 def generate_request_id(payload):
-    """Generate unique request ID from key payload fields."""
+    """
+    Generate unique request ID using Slack's stable identifiers.
+    Uses event_id for Events API events and trigger_id for slash commands.
+    These IDs are stable across Slack retries, ensuring idempotency.
+    """
     import hashlib
-    
-    # Use combination of timestamp, channel, user, and text
-    timestamp = payload.get('event', {}).get('ts') or payload.get('trigger_id') or str(time.time())
-    channel = payload.get('channel_id') or payload.get('channel') or 'unknown'
-    user = payload.get('user_id') or payload.get('user') or 'unknown'
-    text = payload.get('text') or payload.get('command') or ''
-    
-    unique_string = f"{timestamp}:{channel}:{user}:{text}"
+
+    # Get Slack's stable identifier (NOT time-based, as that breaks idempotency)
+    # event_id is provided by Slack for Events API and is stable across retries
+    # trigger_id is provided by Slack for slash commands and is stable across retries
+    slack_id = None
+    id_source = "unknown"
+
+    # Check for Events API event_id (in events payload)
+    if payload.get('event', {}).get('event_id'):
+        slack_id = payload['event']['event_id']
+        id_source = "event_id"
+    # Check for top-level event_id (some event formats)
+    elif payload.get('event_id'):
+        slack_id = payload['event_id']
+        id_source = "event_id"
+    # Check for trigger_id (slash commands)
+    elif payload.get('trigger_id'):
+        slack_id = payload['trigger_id']
+        id_source = "trigger_id"
+    # Fallback: create deterministic hash from payload content
+    # This won't be perfect for retries but better than time-based
+    else:
+        # Use hash of payload as last resort (deterministic for same content)
+        slack_id = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:32]
+        id_source = "payload_hash"
+
+    # Log which identifier type was used for observability
+    print(f"Request ID generated using {id_source}: {slack_id[:16]}...")
+
+    # Combine with channel and user for additional uniqueness in edge cases
+    channel = payload.get('channel_id') or payload.get('channel') or payload.get('event', {}).get('channel') or 'unknown'
+    user = payload.get('user_id') or payload.get('user') or payload.get('event', {}).get('user') or 'unknown'
+
+    unique_string = f"{slack_id}:{channel}:{user}"
     return hashlib.sha256(unique_string.encode()).hexdigest()[:32]
 
 def generate_moogle_thinking_message(payload):

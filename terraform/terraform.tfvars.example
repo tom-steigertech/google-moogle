@@ -1,0 +1,9 @@
+# Copy this file to terraform.tfvars and fill in your actual values
+# DO NOT commit terraform.tfvars to git - it contains secrets!
+
+openai_api_key       = "sk-your-openai-api-key-here"
+slack_signing_secret = "your-slack-signing-secret-here"
+slack_bot_token      = "xoxb-your-slack-bot-token-here"
+
+# Optional: leave empty for AWS auto-generation (recommended)
+# api_gateway_api_key = ""

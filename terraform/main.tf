@@ -65,6 +65,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "idempotency" {
     id     = "expire-old-keys"
     status = "Enabled"
 
+    filter {
+      prefix = "" # Applies to all objects
+    }
+
     expiration {
       days = 1
     }
@@ -119,15 +123,6 @@ resource "aws_sqs_queue" "processing_queue" {
   name                      = "${var.project_name}-processing-queue"
   message_retention_seconds = 3600
   receive_wait_time_seconds = 5
-
-  redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.dlq.arn
-    maxReceiveCount     = 3
-  })
-}
-
-resource "aws_sqs_queue" "dlq" {
-  name = "${var.project_name}-processing-dlq"
 }
 
 # IAM Role for Lambda functions
@@ -180,10 +175,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "sqs:GetQueueAttributes",
           "sqs:GetQueueUrl"
         ]
-        Resource = [
-          aws_sqs_queue.processing_queue.arn,
-          aws_sqs_queue.dlq.arn
-        ]
+        Resource = aws_sqs_queue.processing_queue.arn
       }
     ]
   })
@@ -191,9 +183,9 @@ resource "aws_iam_role_policy" "lambda_policy" {
 
 # Lambda Layer for dependencies
 resource "aws_lambda_layer_version" "dependencies" {
-  filename         = "lambda_functions/layer.zip"
+  filename         = "../lambda_functions/layer.zip"
   layer_name       = "${var.project_name}-dependencies"
-  source_code_hash = filebase64sha256("lambda_functions/layer.zip")
+  source_code_hash = filebase64sha256("../lambda_functions/layer.zip")
 
   compatible_runtimes = ["python3.11"]
 }
@@ -207,8 +199,8 @@ resource "aws_lambda_function" "initial" {
   timeout       = 10
   memory_size   = 256
 
-  filename         = "lambda_functions/initial_lambda.zip"
-  source_code_hash = filebase64sha256("lambda_functions/initial_lambda.zip")
+  filename         = "../lambda_functions/initial_lambda.zip"
+  source_code_hash = filebase64sha256("../lambda_functions/initial_lambda.zip")
 
   layers = [aws_lambda_layer_version.dependencies.arn]
 
@@ -229,8 +221,8 @@ resource "aws_lambda_function" "processing" {
   timeout       = 60
   memory_size   = 512
 
-  filename         = "lambda_functions/processing_lambda.zip"
-  source_code_hash = filebase64sha256("lambda_functions/processing_lambda.zip")
+  filename         = "../lambda_functions/processing_lambda.zip"
+  source_code_hash = filebase64sha256("../lambda_functions/processing_lambda.zip")
 
   layers = [aws_lambda_layer_version.dependencies.arn]
 
@@ -270,8 +262,8 @@ resource "aws_lambda_function" "authorizer" {
   timeout       = 10
   memory_size   = 128
 
-  filename         = "lambda_functions/authorizer.zip"
-  source_code_hash = filebase64sha256("lambda_functions/authorizer.zip")
+  filename         = "../lambda_functions/authorizer.zip"
+  source_code_hash = filebase64sha256("../lambda_functions/authorizer.zip")
 
   environment {
     variables = {
