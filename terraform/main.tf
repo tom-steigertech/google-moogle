@@ -1,18 +1,14 @@
 terraform {
   required_version = ">= 1.0"
 
-  # NOTE: To enable remote state:
-  # 1. First run 'terraform apply' to create the backend resources (S3 bucket + DynamoDB table)
-  # 2. Then uncomment the backend block below
-  # 3. Run 'terraform init -migrate-state' to move state to S3
-  #
-  # backend "s3" {
-  #   bucket         = "ff-moogle-bot-terraform-state"  # Must match var.terraform_state_bucket
-  #   key            = "terraform.tfstate"
-  #   region         = "us-east-1"
-  #   encrypt        = true
-  #   dynamodb_table = "ff-moogle-bot-terraform-locks"  # Must match var.terraform_locks_table
-  # }
+  # Remote state backend - resources created by initial terraform apply
+  backend "s3" {
+    bucket         = "ff-moogle-bot-terraform-state"
+    key            = "terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "ff-moogle-bot-terraform-locks"
+  }
 
   required_providers {
     aws = {
@@ -120,9 +116,10 @@ resource "aws_dynamodb_table" "terraform_locks" {
 
 # SQS Queue
 resource "aws_sqs_queue" "processing_queue" {
-  name                      = "${var.project_name}-processing-queue"
-  message_retention_seconds = 3600
-  receive_wait_time_seconds = 5
+  name                       = "${var.project_name}-processing-queue"
+  message_retention_seconds  = 3600
+  receive_wait_time_seconds  = 5
+  visibility_timeout_seconds = 60 # Must be >= Lambda timeout (60s)
 }
 
 # IAM Role for Lambda functions
