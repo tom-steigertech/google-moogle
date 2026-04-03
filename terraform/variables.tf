@@ -23,9 +23,10 @@ variable "slack_bot_token" {
 }
 
 variable "api_gateway_api_key" {
-  description = "API Gateway API key for request validation (sent as query parameter)"
+  description = "Optional: Custom API Gateway API key. If not provided, AWS will auto-generate one."
   type        = string
   sensitive   = true
+  default     = "" # Empty means AWS will auto-generate
 }
 
 variable "project_name" {
@@ -38,4 +39,16 @@ variable "idempotency_ttl_minutes" {
   description = "TTL for idempotency keys in S3 (in minutes)"
   type        = number
   default     = 5
+}
+
+variable "terraform_state_bucket" {
+  description = "S3 bucket name for storing Terraform state (must be globally unique)"
+  type        = string
+  default     = "ff-moogle-bot-terraform-state"
+}
+
+variable "terraform_locks_table" {
+  description = "DynamoDB table name for Terraform state locking"
+  type        = string
+  default     = "ff-moogle-bot-terraform-locks"
 }
