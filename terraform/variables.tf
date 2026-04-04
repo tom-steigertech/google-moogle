@@ -52,3 +52,14 @@ variable "terraform_locks_table" {
   type        = string
   default     = "ff-moogle-bot-terraform-locks"
 }
+
+variable "log_level" {
+  description = "Logging level for Lambda functions (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default is ERROR for minimal logging."
+  type        = string
+  default     = "ERROR"
+
+  validation {
+    condition     = contains(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], upper(var.log_level))
+    error_message = "LOG_LEVEL must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL."
+  }
+}
