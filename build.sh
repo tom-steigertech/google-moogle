@@ -14,12 +14,19 @@ cd layer_build
 zip -r ../lambda_functions/layer.zip python/
 cd ..
 
-# Create individual Lambda zip files
-for lambda in authorizer initial_lambda processing_lambda; do
+# Create authorizer and initial Lambda zip files (single file functions)
+for lambda in authorizer initial_lambda; do
     cd lambda_functions
     zip -j ${lambda}.zip ${lambda}.py
     cd ..
 done
+
+# Create processing Lambda zip (Python package with multiple modules)
+echo "Packaging processing Lambda (Python package)..."
+cd lambda_functions
+# Create zip with the entire processing package directory
+zip -r processing_lambda.zip processing/
+cd ..
 
 echo "Build complete!"
 echo ""

@@ -1,5 +1,19 @@
 # AGENTS.md - Project Context for OpenCode
 
+## User Responsibilities
+
+**Build & Deploy**: The user (not OpenCode) handles all build and deployment operations.
+- `./build.sh` - User runs this to create Lambda packages
+- `cd terraform && terraform apply` - User deploys infrastructure
+- Verify deployments and troubleshoot AWS issues - User's responsibility
+
+OpenCode should:
+- Focus on code changes, architecture design, and logic implementation
+- NOT run build.sh or terraform commands
+- Provide clear instructions for the user to execute
+
+---
+
 ## Project Overview
 
 **pyGoogleMoogle** is a serverless Slack bot that responds to @mentions and slash commands with witty Final Fantasy Moogle-style responses powered by OpenAI.
@@ -33,16 +47,61 @@ All resources tagged with: `appname=slackbotGoogleMoogle`
 - Terraform deployment lifecycle fixes
 - Default-deny policy in authorizer (only GET/POST allowed)
 - Configurable logging via `LOG_LEVEL` environment variable (default: ERROR)
+- **Refactored Processing Lambda** into modular package:
+  - `MoogleLLMClient` class for OpenAI interactions (testable in isolation!)
+  - `MoogleSlackClient` class for Slack Web API
+  - `utils.py` with shared helpers
+  - Thin `handler.py` orchestration layer
+  - Test harness in `tools/test_llm_client.py`
+- **Infrastructure fully deployed and operational** - bot responding to @mentions and slash commands
 
 ### Known Issues / In Progress
 - **x-api-key vs api_key**: `x-api-key` appears reserved/filtered by API Gateway. Using `api_key` query parameter instead. Debug logging added to authorizer to investigate.
 
 ### Pending
-- Build and deploy Lambda packages (need to run `./build.sh` then `terraform apply`)
-- Test logging configuration in deployed environment
-- Verify authorizer behavior with debug logs
-- Configure Slack app with terraform outputs
-- Test @mentions and slash commands in actual Slack
+- (None - infrastructure deployment complete)
+
+## Upcoming Enhancements (Priority Order)
+
+### 1. LLM Prompting & Model Improvements
+**Goal**: Improve response quality and test alternative models
+- Refine Moogle personality prompts for better character consistency
+- Test other OpenAI models (gpt-4o, gpt-3.5-turbo) for cost/quality tradeoffs
+- Experiment with temperature and token settings
+- Add support for multi-turn conversations (context/history)
+- A/B test different prompt strategies
+
+### 2. Knowledge Augmentation (RAG or Web Scraping)
+**Goal**: Enhance responses with structured Final Fantasy knowledge
+- **Option A - RAG**: Build vector database of FF lore (wikis, game scripts, fan sites)
+  - Research embedding models and vector stores (Pinecone, Weaviate, pgvector)
+  - Data pipeline for ingesting FF content
+  - Query-time retrieval to augment prompts
+- **Option B - Web Scraping**: Real-time search for current FF info
+  - Integrate search APIs (Google Custom Search, Bing)
+  - Scrape and parse FF wiki pages on-demand
+  - Cache frequently accessed content in S3/DynamoDB
+- Evaluate hybrid approach (RAG for lore + web for news/current events)
+
+### 3. LLM Evaluation & User Ranking System
+**Goal**: Systematically compare LLM responses and collect user feedback
+- Design periodic test question suite covering:
+  - Lore accuracy (characters, storylines, game mechanics)
+  - Character consistency (Moogle voice/personality)
+  - Helpfulness (actual utility to FF players)
+- Implement multi-model comparison:
+  - Send same question to multiple models in parallel
+  - Present responses to users with anonymous voting
+  - Store rankings in DynamoDB for analysis
+- Build analytics dashboard:
+  - Model performance metrics over time
+  - User satisfaction trends
+  - Identify question types where models struggle
+
+### Research Needed
+- Vector database options that integrate well with AWS Lambda
+- Cost analysis: RAG infrastructure vs API costs for larger context windows
+- Slack interaction patterns for presenting multiple responses (threading vs ephemeral)
 
 ## File Structure
 
@@ -54,8 +113,13 @@ All resources tagged with: `appname=slackbotGoogleMoogle`
 ├── lambda_functions/
 │   ├── authorizer.py                  # API key validation (default-deny policy)
 │   ├── initial_lambda.py              # Slack signature validation, immediate responses
-│   ├── processing_lambda.py           # OpenAI integration, error handling
 │   ├── requirements.txt               # boto3, requests, openai
+│   ├── processing/                    # Processing Lambda package (NEW)
+│   │   ├── __init__.py                # Package init, exports handler
+│   │   ├── handler.py                 # Lambda orchestration (thin layer)
+│   │   ├── llm_client.py              # OpenAI/MoogleLLMClient (testable in isolation!)
+│   │   ├── slack_client.py            # Slack Web API wrapper
+│   │   └── utils.py                   # Question extraction, logging, helpers
 │   └── *.zip                          # Build artifacts (rebuild with build.sh)
 ├── terraform/
 │   ├── main.tf                        # All infrastructure
@@ -64,6 +128,7 @@ All resources tagged with: `appname=slackbotGoogleMoogle`
 │   └── fix_deployment.sh              # Emergency deployment fix
 └── tools/
     ├── test_api.sh                    # Test endpoints
+    ├── test_llm_client.py             # NEW: Test LLM in isolation
     └── README.md                      # Testing documentation
 ```
 
@@ -122,10 +187,47 @@ aws logs tail /aws/lambda/ff-moogle-bot-authorizer --follow
 
 ## Next Steps for Next Session
 
-1. **Build Lambda packages**: Run `./build.sh` to create updated .zip files
-2. **Deploy**: `cd terraform && terraform apply`
-3. **Test logging**: Set `LOG_LEVEL=DEBUG` temporarily to verify it works
-4. **Investigate x-api-key**: Check CloudWatch logs to see what queryStringParameters contains
-5. **Reset to minimal logging**: Set `LOG_LEVEL=ERROR` for production
-6. **Configure Slack**: Use terraform outputs to set up Event Subscriptions and Slash Commands
-7. **Test in Slack**: Verify @mentions and slash commands work
+### Immediate (Infrastructure Complete)
+- Infrastructure is deployed and operational - no immediate build/deploy needed
+- x-api-key investigation on hold (using `api_key` works fine)
+
+### Active Development Priorities
+
+#### 1. LLM Prompting & Model Improvements
+- Refine Moogle personality in `llm_client.py` - test with `tools/test_llm_client.py`
+- Add configuration options for model selection (gpt-4o-mini, gpt-4o, gpt-3.5-turbo)
+- Experiment with temperature, max_tokens, system prompt variations
+- Consider multi-turn conversation support (context/history management)
+
+#### 2. Knowledge Augmentation (RAG vs Web Scraping)
+**Research needed:**
+- Evaluate vector databases (Pinecone, Weaviate, pgvector, OpenSearch) for RAG
+- Consider web scraping approach (search APIs + on-demand scraping)
+- Assess AWS-native options (Bedrock Knowledge Bases, Kendra)
+- Cost/benefit analysis: RAG infrastructure vs larger context window costs
+
+**Implementation ideas:**
+- S3 + Lambda for data pipeline
+- DynamoDB for caching scraped content
+- Separate async processing for data ingestion
+
+#### 3. LLM Evaluation & User Ranking
+- Design test question suite (lore accuracy, character consistency, helpfulness)
+- Implement multi-model parallel comparison
+- Slack interaction for presenting multiple responses (threaded vs ephemeral)
+- DynamoDB schema for storing rankings and metrics
+- Analytics dashboard (CloudWatch, QuickSight, or simple CLI)
+
+### Quick Commands for Development
+
+```bash
+# Test LLM in isolation
+export OPENAI_API_KEY='your-key'
+python tools/test_llm_client.py "Tell me about chocobos" -v
+
+# Test different models
+python tools/test_llm_client.py "What are Materia?" --model gpt-4o
+
+# Check production logs
+aws logs tail /aws/lambda/ff-moogle-bot-processing --follow --since 1h
+```

@@ -280,7 +280,7 @@ resource "aws_lambda_function" "initial" {
 resource "aws_lambda_function" "processing" {
   function_name = "${var.project_name}-processing"
   role          = aws_iam_role.lambda_role.arn
-  handler       = "processing_lambda.handler"
+  handler       = "processing.handler"
   runtime       = "python3.11"
   timeout       = 60
   memory_size   = 512
