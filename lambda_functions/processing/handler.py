@@ -169,15 +169,18 @@ def handler(event, context):
                         except Exception as card_err:
                             logger.error(f"Failed to post item card for {item_name}: {card_err}")
 
-            # Send Moogle flavor text response
+            # Send Moogle flavor text response (non-fatal so memory always saves).
             logger.info("Sending response to Slack")
-            slack_client.send_response(
-                channel_id=channel_id,
-                text=answer,
-                thread_ts=thread_ts,
-                is_mention=is_mention
-            )
-            
+            try:
+                slack_client.send_response(
+                    channel_id=channel_id,
+                    text=answer,
+                    thread_ts=thread_ts,
+                    is_mention=is_mention
+                )
+            except Exception as slack_err:
+                logger.error(f"Failed to post flavor text: {slack_err}")
+
             # Persist turns to AgentCore Memory (best-effort; don't fail the request)
             if MEMORY_ID and actor_id and session_id:
                 try:
