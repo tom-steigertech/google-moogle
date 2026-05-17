@@ -5,7 +5,7 @@ variable "aws_region" {
 }
 
 variable "bedrock_model_id" {
-  description = "Bedrock model ID (default: Amazon Nova Lite). Switch to anthropic.claude-haiku-4-5-20251001-v1:0 once Claude model access is approved."
+  description = "Bedrock model ID (default: Amazon Nova Lite). Switch to us.anthropic.claude-haiku-4-5-20251001-v1:0 (cross-region inference profile) once Claude Haiku 4.5 Marketplace access is approved in Bedrock."
   type        = string
   default     = "amazon.nova-lite-v1:0"
 }
@@ -51,6 +51,24 @@ variable "terraform_locks_table" {
   description = "DynamoDB table name for Terraform state locking"
   type        = string
   default     = "ff-moogle-bot-terraform-locks"
+}
+
+variable "slack_chatbot_workspace_id" {
+  description = "Slack workspace ID for AWS Chatbot (starts with T — found in workspace URL)"
+  type        = string
+  default     = "T1HUKSP2M"
+}
+
+variable "slack_chatbot_channel_id" {
+  description = "Slack channel ID for AWS Chatbot notifications (right-click channel → View channel details)"
+  type        = string
+  default     = "C03HE46DXC7"
+}
+
+variable "runaway_alarm_threshold" {
+  description = "Initial Lambda invocations per minute that triggers runaway protection (throttles the bot to zero). Tune based on expected peak traffic."
+  type        = number
+  default     = 30
 }
 
 variable "log_level" {

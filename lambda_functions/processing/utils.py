@@ -20,11 +20,16 @@ def setup_logging(log_level: str = None) -> logging.Logger:
     if level_str not in valid_levels:
         level_str = 'ERROR'
     
+    level = getattr(logging, level_str)
     logger = logging.getLogger()
-    logger.setLevel(getattr(logging, level_str))
-    
-    # Add handler if not present (for Lambda, this may already be set up)
-    if not logger.handlers:
+    logger.setLevel(level)
+
+    # Lambda's runtime pre-installs a handler at WARNING level; update it so our
+    # chosen level actually takes effect.  Add our own handler only if none exist.
+    if logger.handlers:
+        for h in logger.handlers:
+            h.setLevel(level)
+    else:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'

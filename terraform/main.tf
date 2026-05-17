@@ -14,6 +14,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.21"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
   }
 }
 
@@ -217,8 +221,8 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "bedrock:InvokeModelWithResponseStream"
         ]
         Resource = [
-          "arn:aws:bedrock:${data.aws_region.current.region}::foundation-model/${var.bedrock_model_id}",
-          "arn:aws:bedrock:*::foundation-model/anthropic.*"
+          "arn:aws:bedrock:*::foundation-model/anthropic.*",
+          "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*"
         ]
       },
       {
@@ -301,6 +305,7 @@ resource "aws_lambda_function" "initial" {
       SLACK_BOT_TOKEN      = var.slack_bot_token
       LOG_LEVEL            = var.log_level
       AGENTCORE_MEMORY_ID  = aws_bedrockagentcore_memory.moogle.id
+      SESSION_IDLE_MINUTES = "10"
     }
   }
 
@@ -331,7 +336,7 @@ resource "aws_lambda_function" "processing" {
       SQS_QUEUE_URL         = aws_sqs_queue.processing_queue.url
       LOG_LEVEL             = var.log_level
       AGENTCORE_MEMORY_ID   = aws_bedrockagentcore_memory.moogle.id
-      SESSION_IDLE_MINUTES  = "60"
+      SESSION_IDLE_MINUTES  = "10"
     }
   }
 
@@ -613,6 +618,177 @@ resource "aws_api_gateway_usage_plan_key" "slack_usage_plan_key" {
   usage_plan_id = aws_api_gateway_usage_plan.slack_usage_plan.id
 }
 
+# ─── Runaway protection ────────────────────────────────────────────────────────
+# CloudWatch alarm fires when the initial Lambda is invoked too frequently,
+# SNS delivers the notification to the throttle Lambda, which sets reserved
+# concurrency to 0. API Gateway then returns 429 without invoking the bot.
+# Recovery: aws lambda delete-function-concurrency --function-name <initial>
+
+data "archive_file" "throttle_lambda" {
+  type        = "zip"
+  output_path = "${path.module}/throttle_lambda.zip"
+  source {
+    content  = file("${path.module}/../lambda_functions/throttle/throttle.py")
+    filename = "throttle.py"
+  }
+}
+
+resource "aws_iam_role" "throttle_lambda_role" {
+  name = "${var.project_name}-throttle-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "throttle_lambda_policy" {
+  name = "${var.project_name}-throttle-lambda-policy"
+  role = aws_iam_role.throttle_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "lambda:PutFunctionConcurrency"
+        Resource = aws_lambda_function.initial.arn
+      }
+    ]
+  })
+}
+
+resource "aws_lambda_function" "throttle" {
+  function_name    = "${var.project_name}-runaway-throttle"
+  role             = aws_iam_role.throttle_lambda_role.arn
+  handler          = "throttle.handler"
+  runtime          = "python3.11"
+  timeout          = 10
+  memory_size      = 128
+  filename         = data.archive_file.throttle_lambda.output_path
+  source_code_hash = data.archive_file.throttle_lambda.output_base64sha256
+
+  environment {
+    variables = {
+      TARGET_FUNCTION_NAME = aws_lambda_function.initial.function_name
+    }
+  }
+
+  depends_on = [aws_iam_role_policy.throttle_lambda_policy]
+}
+
+resource "aws_sns_topic" "runaway_alarm" {
+  name = "${var.project_name}-runaway-alarm"
+}
+
+resource "aws_lambda_permission" "throttle_sns" {
+  statement_id  = "AllowSNSInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.throttle.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.runaway_alarm.arn
+}
+
+resource "aws_sns_topic_subscription" "throttle_lambda" {
+  topic_arn = aws_sns_topic.runaway_alarm.arn
+  protocol  = "lambda"
+  endpoint  = aws_lambda_function.throttle.arn
+
+  depends_on = [aws_lambda_permission.throttle_sns]
+}
+
+resource "aws_cloudwatch_metric_alarm" "runaway_protection" {
+  alarm_name        = "${var.project_name}-runaway-protection"
+  alarm_description = "Throttles the bot to 0 concurrency when invocations exceed ${var.runaway_alarm_threshold}/min (runaway loop or abuse)"
+
+  namespace           = "AWS/Lambda"
+  metric_name         = "Invocations"
+  dimensions          = { FunctionName = aws_lambda_function.initial.function_name }
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = var.runaway_alarm_threshold
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [
+    aws_sns_topic.runaway_alarm.arn,    # triggers throttle Lambda
+    aws_sns_topic.notifications.arn,    # sends to Slack via Chatbot
+  ]
+}
+
+# ─── AWS Chatbot / Slack notifications ────────────────────────────────────────
+
+resource "aws_sns_topic" "notifications" {
+  name = "${var.project_name}-notifications"
+}
+
+resource "aws_sns_topic_policy" "notifications" {
+  arn = aws_sns_topic.notifications.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowAccountPublish"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.notifications.arn
+      },
+      {
+        Sid       = "AllowCloudWatchPublish"
+        Effect    = "Allow"
+        Principal = { Service = "cloudwatch.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.notifications.arn
+        Condition = {
+          StringEquals = {
+            "AWS:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "chatbot" {
+  name = "${var.project_name}-chatbot-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "chatbot.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "chatbot_readonly" {
+  role       = aws_iam_role.chatbot.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+resource "aws_chatbot_slack_channel_configuration" "code_testing" {
+  configuration_name = "${var.project_name}-code-testing"
+  iam_role_arn       = aws_iam_role.chatbot.arn
+  slack_team_id      = var.slack_chatbot_workspace_id
+  slack_channel_id   = var.slack_chatbot_channel_id
+  sns_topic_arns     = [aws_sns_topic.notifications.arn]
+
+  depends_on = [aws_iam_role_policy_attachment.chatbot_readonly]
+}
+
 # Outputs
 output "api_gateway_events_url" {
   value       = "${aws_api_gateway_stage.prod.invoke_url}/googlemoogle/events"
@@ -658,4 +834,14 @@ output "terraform_locks_table" {
 output "agentcore_memory_id" {
   value       = aws_bedrockagentcore_memory.moogle.id
   description = "AgentCore Memory ID for multi-turn conversation state"
+}
+
+output "runaway_recovery_command" {
+  value       = "aws lambda delete-function-concurrency --function-name ${aws_lambda_function.initial.function_name} --region ${var.aws_region}"
+  description = "Run this command to re-enable the bot after a runaway protection throttle"
+}
+
+output "notifications_sns_arn" {
+  value       = aws_sns_topic.notifications.arn
+  description = "Add this SNS ARN to your existing billing alarms so they notify #code-testing via Chatbot"
 }

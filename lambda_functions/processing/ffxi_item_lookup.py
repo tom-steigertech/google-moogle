@@ -96,10 +96,32 @@ def fetch_item_html(title: str, session: requests.Session) -> Optional[str]:
 
 def candidate_titles(name: str) -> Iterable[str]:
     name = name.strip()
-    yield name.replace(" ", "_")
-    yield name.title().replace(" ", "_")
+    seen: set = set()
+
+    def _emit(raw: str):
+        t = raw.replace(" ", "_")
+        if t not in seen:
+            seen.add(t)
+            return t
+        return None
+
+    for raw in [name, name.title()]:
+        t = _emit(raw)
+        if t:
+            yield t
     if name and not name[0].isupper():
-        yield (name[0].upper() + name[1:]).replace(" ", "_")
+        t = _emit(name[0].upper() + name[1:])
+        if t:
+            yield t
+
+    # Singular fallback: if the LLM passed a plural form (e.g. "Beehive Chips"),
+    # also try without the trailing 's'.
+    if name.lower().endswith("s") and len(name) > 2:
+        singular = name[:-1]
+        for raw in [singular, singular.title()]:
+            t = _emit(raw)
+            if t:
+                yield t
 
 
 GIL_RE = re.compile(r"([\d,]+)\s*gil", re.IGNORECASE)

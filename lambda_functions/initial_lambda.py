@@ -27,6 +27,7 @@ SQS_QUEUE_URL = os.environ['SQS_QUEUE_URL']
 SLACK_SIGNING_SECRET = os.environ['SLACK_SIGNING_SECRET']
 SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN', '')
 AGENTCORE_MEMORY_ID = os.environ.get('AGENTCORE_MEMORY_ID', '')
+IDLE_MINUTES = int(os.environ.get('SESSION_IDLE_MINUTES', '10'))
 
 def handler(event, context):
     """
@@ -88,12 +89,28 @@ def handler(event, context):
     # Determine if this is an @mention, thread reply, or slash command
     event_data = payload.get('event', {})
     event_type = event_data.get('type')
+
+    # Drop any event the bot itself generated — bot_id is present on messages
+    # sent via chat.postMessage with a bot token; subtype catches legacy format.
+    if event_data.get('bot_id') or event_data.get('subtype') == 'bot_message':
+        logger.debug("Ignoring bot-generated message event")
+        return {'statusCode': 200, 'body': json.dumps({'ok': True})}
+
     is_mention = event_type == 'app_mention'
     is_thread_reply = (
         event_type == 'message'
         and event_data.get('thread_ts') is not None
         and event_data.get('bot_id') is None
         and event_data.get('subtype') is None
+        and event_data.get('user') is not None
+    )
+    is_channel_message = (
+        event_type == 'message'
+        and event_data.get('thread_ts') is None
+        and event_data.get('bot_id') is None
+        and event_data.get('subtype') is None
+        and event_data.get('user') is not None
+        and '<@' not in event_data.get('text', '')  # @mentions fire app_mention separately
     )
     is_slash_command = payload.get('command') is not None
 
@@ -124,11 +141,20 @@ def handler(event, context):
     else:
         session_id = user_session_id
 
+    # Plain channel messages (non-thread, non-mention): only respond if sender has
+    # an active session within the idle window. This prevents the bot from joining
+    # general channel chatter.
+    if is_channel_message:
+        if not _session_is_active(actor_id, user_session_id, IDLE_MINUTES):
+            logger.info(f"Channel message ignored — no active session for {actor_id}")
+            return {'statusCode': 200, 'body': json.dumps({'ok': True})}
+        session_id = user_session_id
+
     # For thread-based interactions, resolve the best session to use.
     # If the thread session has no memory, fall back to the user's main-channel
     # session — this handles the common case of @mention in the channel followed
     # by a thread reply to the bot's response (different thread_ts, same conversation).
-    if thread_ts and not _session_has_memory(actor_id, session_id):
+    elif thread_ts and not _session_has_memory(actor_id, session_id):
         if session_id != user_session_id and _session_has_memory(actor_id, user_session_id):
             logger.info(f"Thread resolved to user session {user_session_id!r}")
             session_id = user_session_id
@@ -136,6 +162,12 @@ def handler(event, context):
             # No memory in thread session or user session — unrelated thread, ignore.
             logger.info(f"Thread reply ignored — no prior session in {session_id!r}")
             return {'statusCode': 200, 'body': json.dumps({'ok': True})}
+
+    # Drop anything that isn't a recognised command type — prevents message.channels
+    # events that slipped through the earlier filters from reaching SQS.
+    if not (is_mention or is_channel_message or is_thread_reply or is_slash_command):
+        logger.info("Unactionable event — skipping SQS enqueue")
+        return {'statusCode': 200, 'body': json.dumps({'ok': True})}
 
     # Handle /moogle reset — clear session and return early (no SQS enqueue)
     if is_slash_command and payload.get('text', '').strip().lower() == 'reset':
@@ -255,6 +287,37 @@ def _session_has_memory(actor_id: str, session_id: str) -> bool:
         return len(events) > 0
     except Exception as e:
         logger.error(f"Error checking session memory: {e}")
+        return False
+
+
+def _session_is_active(actor_id: str, session_id: str, idle_minutes: int = 10) -> bool:
+    """Return True if the session has memory AND the last event is within idle_minutes."""
+    if not AGENTCORE_MEMORY_ID:
+        return False
+    try:
+        resp = agentcore.list_events(
+            memoryId=AGENTCORE_MEMORY_ID,
+            actorId=actor_id,
+            sessionId=session_id,
+        )
+        events = resp.get('events') or resp.get('memoryEvents') or []
+        if not events:
+            return False
+        from datetime import datetime, timezone
+
+        def _ts(e):
+            raw = e.get('eventTimestamp') or ''
+            if isinstance(raw, datetime):
+                return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+            try:
+                return datetime.fromisoformat(str(raw).replace('Z', '+00:00'))
+            except Exception:
+                return datetime.fromtimestamp(0, tz=timezone.utc)
+
+        last_ts = max(_ts(e) for e in events)
+        return (datetime.now(tz=timezone.utc) - last_ts).total_seconds() <= idle_minutes * 60
+    except Exception as e:
+        logger.error(f"Error checking session activity: {e}")
         return False
 
 

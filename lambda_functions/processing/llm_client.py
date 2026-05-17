@@ -127,8 +127,14 @@ Remember: Stay in character as a Moogle!"""
         converse_messages = _to_converse_messages(messages)
         all_item_lookups = []
 
+        # Force a tool call on the first iteration when the question looks like an
+        # item query.  Nova Lite tends to skip the tool with long conversation history.
+        force_tool_first = _looks_like_item_query(str(last_user))
+        self.logger.info(f"force_tool_first={force_tool_first}")
+
         for iteration in range(MAX_TOOL_ITERATIONS):
-            response = self._invoke(converse_messages, max_tokens, temperature)
+            force = force_tool_first and iteration == 0
+            response = self._invoke(converse_messages, max_tokens, temperature, force_tool=force)
             stop_reason = response.get("stopReason")
             output_message = response["output"]["message"]
             content_blocks = output_message.get("content", [])
@@ -155,13 +161,17 @@ Remember: Stay in character as a Moogle!"""
             f"Converse tool-use loop did not converge after {MAX_TOOL_ITERATIONS} iterations"
         )
 
-    def _invoke(self, converse_messages: list, max_tokens: int, temperature: float) -> dict:
+    def _invoke(self, converse_messages: list, max_tokens: int, temperature: float,
+                force_tool: bool = False) -> dict:
+        tool_config: dict = {"tools": [FFXI_ITEM_LOOKUP_TOOL]}
+        if force_tool:
+            tool_config["toolChoice"] = {"any": {}}
         try:
             return self.client.converse(
                 modelId=self.model_id,
                 system=[{"text": self.system_prompt}],
                 messages=converse_messages,
-                toolConfig={"tools": [FFXI_ITEM_LOOKUP_TOOL]},
+                toolConfig=tool_config,
                 inferenceConfig={
                     "maxTokens": max_tokens,
                     "temperature": temperature,
@@ -244,6 +254,18 @@ def _to_converse_messages(messages: list) -> list:
             converted = [{"text": str(content)}]
         result.append({"role": m["role"], "content": converted})
     return result
+
+
+_ITEM_QUERY_PATTERNS = re.compile(
+    r"\b(where (can|do) i (get|find|buy|farm)|drop(s|ped)? (from|by)|sold by|"
+    r"vendor|price|cost|how (much|many)|stack(able)?|rare|ex |exclusive|"
+    r"npc sell|resale|obtain|craft|synth|synthesis|recipe)\b",
+    re.IGNORECASE,
+)
+
+def _looks_like_item_query(text: str) -> bool:
+    """Return True if the text looks like a question about a specific FFXI item."""
+    return bool(_ITEM_QUERY_PATTERNS.search(text))
 
 
 _THINKING_RE = re.compile(r"<thinking>.*?</thinking>", re.DOTALL | re.IGNORECASE)

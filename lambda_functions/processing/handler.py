@@ -169,17 +169,22 @@ def handler(event, context):
                         except Exception as card_err:
                             logger.error(f"Failed to post item card for {item_name}: {card_err}")
 
-            # Send Moogle flavor text response (non-fatal so memory always saves).
-            logger.info("Sending response to Slack")
-            try:
-                slack_client.send_response(
-                    channel_id=channel_id,
-                    text=answer,
-                    thread_ts=thread_ts,
-                    is_mention=is_mention
-                )
-            except Exception as slack_err:
-                logger.error(f"Failed to post flavor text: {slack_err}")
+            # Only send LLM flavor text when no item card was posted.
+            # When an item is found, the card contains all the information.
+            any_item_found = any(il.get("found") for il in item_lookups)
+            if not any_item_found:
+                logger.info("Sending response to Slack")
+                try:
+                    slack_client.send_response(
+                        channel_id=channel_id,
+                        text=answer,
+                        thread_ts=thread_ts,
+                        is_mention=is_mention
+                    )
+                except Exception as slack_err:
+                    logger.error(f"Failed to post flavor text: {slack_err}")
+            else:
+                logger.info("Item card posted — suppressing LLM flavor text")
 
             # Persist turns to AgentCore Memory (best-effort; don't fail the request)
             if MEMORY_ID and actor_id and session_id:
