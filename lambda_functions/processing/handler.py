@@ -11,6 +11,7 @@ import json
 import boto3
 
 from .llm_client import MoogleLLMClient
+from .memory_client import load_recent_turns, save_turn
 from .slack_client import MoogleSlackClient
 from .utils import setup_logging, extract_question, truncate_text, get_env_var
 
@@ -36,7 +37,8 @@ def _initialize_clients():
     
     if llm_client is None:
         llm_client = MoogleLLMClient(
-            api_key=get_env_var('OPENAI_API_KEY'),
+            model_id=get_env_var('BEDROCK_MODEL_ID', required=False),
+            region_name=get_env_var('BEDROCK_REGION', required=False),
             log_level=get_env_var('LOG_LEVEL', required=False, default='ERROR')
         )
     
@@ -87,12 +89,14 @@ def handler(event, context):
             request_id = message.get('request_id')
             
             logger.info(f"Processing request: {request_id}")
-            
+
             # Extract message metadata
             channel_id = message.get('channel_id')
             thread_ts = message.get('thread_ts')
             is_mention = message.get('is_mention', False)
             is_slash_command = message.get('is_slash_command', False)
+            actor_id = message.get('actor_id', '')
+            session_id = message.get('session_id', '')
             
             logger.debug(
                 f"Message info - channel_id: {channel_id}, "
@@ -117,14 +121,38 @@ def handler(event, context):
             # Extract question
             question = extract_question(payload)
             logger.info(f"Extracted question: {truncate_text(question)}")
-            
-            # Generate response via LLM
-            logger.info("Calling OpenAI API")
-            answer = llm_client.generate_response(question)
-            logger.info(f"OpenAI response received, length: {len(answer)}")
-            
-            # Send to Slack
-            logger.info(f"Sending response to Slack")
+
+            # Build multi-turn messages array from AgentCore Memory
+            MEMORY_ID = get_env_var('AGENTCORE_MEMORY_ID', required=False, default='')
+            IDLE_MINUTES = int(get_env_var('SESSION_IDLE_MINUTES', required=False, default='30'))
+            prior_turns = []
+            if MEMORY_ID and actor_id and session_id:
+                prior_turns = load_recent_turns(MEMORY_ID, actor_id, session_id, IDLE_MINUTES)
+                logger.info(f"Loaded {len(prior_turns)} prior turn(s) from session {session_id!r}")
+            messages = prior_turns + [{"role": "user", "content": question}]
+
+            # Generate response via LLM (Claude on Bedrock + tool use)
+            logger.info("Calling Bedrock Converse API")
+            answer, item_lookups = llm_client.generate_response(messages)
+            logger.info(f"Bedrock response received, length: {len(answer)}, item_lookups: {len(item_lookups)}")
+
+            # Post item data cards first (found items only; LLM handles not-found)
+            for item_data in item_lookups:
+                if item_data.get("found"):
+                    blocks = slack_client.format_item_card(item_data)
+                    if blocks:
+                        item_name = item_data.get("name", "Item")
+                        logger.info(f"Posting item card for: {item_name}")
+                        slack_client.send_blocks(
+                            channel_id=channel_id,
+                            blocks=blocks,
+                            text=f"Item data: {item_name}",
+                            thread_ts=thread_ts,
+                            is_mention=is_mention,
+                        )
+
+            # Send Moogle flavor text response
+            logger.info("Sending response to Slack")
             slack_client.send_response(
                 channel_id=channel_id,
                 text=answer,
@@ -132,6 +160,15 @@ def handler(event, context):
                 is_mention=is_mention
             )
             
+            # Persist turns to AgentCore Memory (best-effort; don't fail the request)
+            if MEMORY_ID and actor_id and session_id:
+                try:
+                    save_turn(MEMORY_ID, actor_id, session_id, "user", question)
+                    save_turn(MEMORY_ID, actor_id, session_id, "assistant", answer)
+                    logger.info("Turns saved to AgentCore Memory")
+                except Exception as mem_err:
+                    logger.error(f"Failed to save turns to memory: {mem_err}")
+
             logger.info(f"Successfully processed request {request_id}")
             _delete_sqs_message(SQS_QUEUE_URL, receipt_handle)
             

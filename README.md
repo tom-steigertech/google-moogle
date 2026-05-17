@@ -1,6 +1,6 @@
 # Final Fantasy Moogle Slack Bot
 
-A serverless Slack bot that answers Final Fantasy questions with the personality of a Moogle, built with AWS Lambda, API Gateway, SQS, and OpenAI.
+A serverless Slack bot that answers Final Fantasy questions with the personality of a Moogle, built with AWS Lambda, API Gateway, SQS, and Claude on Amazon Bedrock. Claude uses tool calling to fetch FFXI item data directly from FFXIclopedia, saving inference tokens when users ask about specific items.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ Slack → API Gateway → Lambda Authorizer (API key validation - prevents abuse
                          ↓
                          SQS
                          ↓
-               Processing Lambda (idempotency check + OpenAI call + Slack response via chat.postMessage)
+               Processing Lambda (idempotency check + Claude on Bedrock + ffxi_item_lookup tool + Slack response via chat.postMessage)
                          ↓
                         Slack
 ```
@@ -22,6 +22,7 @@ Slack → API Gateway → Lambda Authorizer (API key validation - prevents abuse
 3. **Processing Lambda**: Idempotency check prevents duplicate processing from Slack retries
 
 **Key Features:**
+- **Multi-turn conversations**: Bot remembers conversation context within a 30-minute idle window. Works in Slack threads and top-level @mentions. Powered by Amazon Bedrock AgentCore Memory.
 - **Unified Flow**: Both @mentions and slash commands follow the same pattern: immediate "thinking" message via Web API, then async processing
 - **Async Processing**: Initial Lambda responds immediately by posting a "thinking" Moogle message via `chat.postMessage`, processing happens asynchronously
 - **Error Handling**: Processing Lambda catches all errors and posts a friendly Moogle-style error message to Slack
@@ -34,6 +35,7 @@ Slack → API Gateway → Lambda Authorizer (API key validation - prevents abuse
 - AWS CLI configured with appropriate credentials
 - Terraform >= 1.0
 - Python 3.11
+- Amazon Bedrock model access enabled for Anthropic Claude models (AWS Console > Bedrock > Model access)
 - Slack app with:
   - Bot token (`xoxb-...`)
   - Signing secret
@@ -49,18 +51,28 @@ chmod +x build.sh
 ```
 
 This creates:
-- `lambda_functions/layer.zip` - Python dependencies (boto3, requests, openai)
+- `lambda_functions/layer.zip` - Python dependencies (boto3, requests, beautifulsoup4)
 - `lambda_functions/authorizer.zip` - API key validator
 - `lambda_functions/initial_lambda.zip` - Parse request, post thinking message, enqueue to SQS
-- `lambda_functions/processing_lambda.zip` - Idempotency check, OpenAI integration, post final response
+- `lambda_functions/processing_lambda.zip` - Idempotency check, Claude-on-Bedrock + tool use, post final response
 
 ### 2. Configure Secrets
 
 ```bash
-export TF_VAR_openai_api_key='your-openai-api-key'
 export TF_VAR_slack_signing_secret='your-slack-signing-secret'
 export TF_VAR_slack_bot_token='xoxb-your-bot-token'
+
+# Optional: override the default Claude Haiku 4.5 model
+# export TF_VAR_bedrock_model_id='anthropic.claude-haiku-4-5-20251001-v1:0'
 ```
+
+> The Lambda IAM role handles Bedrock + AgentCore auth — no API keys needed.
+> Ensure Bedrock model access is enabled in the deployment region.
+
+### 2.5 Bump Terraform provider
+
+The `hashicorp/aws` provider must be `~> 6.21` for `aws_bedrockagentcore_memory`.
+Run `terraform init -upgrade` once to upgrade from `~> 5.x`.
 
 ### 3. Deploy Infrastructure
 
@@ -113,6 +125,21 @@ The bot will immediately post a "thinking" message in the channel, then post the
 ```
 The bot will immediately post a "thinking" message in the channel, then post the final answer below it.
 
+### 3. Continue a conversation (multi-turn):
+Reply in a thread or send another top-level @mention within 30 minutes:
+```
+@GoogleMoogle who is Cloud Strife?
+... (bot replies) ...
+@GoogleMoogle what about Tifa?   ← bot remembers the Cloud context
+```
+Conversations are scoped per user per channel. A 30-minute idle period starts a fresh context.
+
+### 4. Reset conversation memory:
+```
+/moogle reset
+```
+The bot will immediately clear its memory of the current conversation and confirm with a message.
+
 The bot responds with Moogle personality:
 - "Kupo! Cloud Strife is the main protagonist of Final Fantasy VII..."
 - "Kupo kupo! To beat Emerald Weapon, you'll need..."
@@ -131,10 +158,16 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
 ```
 .
 ├── build.sh                          # Build script for Lambda packages
+├── ffxi_item_lookup.py               # Standalone CLI version of the wiki scraper
 ├── lambda_functions/
 │   ├── authorizer.py                 # API key validator
 │   ├── initial_lambda.py             # Parse request, post thinking message, enqueue to SQS
-│   ├── processing_lambda.py          # Idempotency check, OpenAI integration, error handling
+│   ├── processing/                   # Processing Lambda package
+│   │   ├── handler.py                # Lambda orchestration (thin layer)
+│   │   ├── llm_client.py             # Claude on Bedrock + tool-use loop
+│   │   ├── ffxi_item_lookup.py       # FFXIclopedia scraper (Claude tool implementation)
+│   │   ├── slack_client.py           # Slack Web API wrapper
+│   │   └── utils.py                  # Shared helpers
 │   ├── requirements.txt              # Python dependencies
 │   └── *.zip                         # Built Lambda packages
 └── terraform/
@@ -160,13 +193,23 @@ All endpoints require the `api_key` query parameter (e.g., `?api_key=YOUR_KEY`).
 Edit the S3 lifecycle configuration in `terraform/main.tf` (default: 1 day)
 
 ### Modify Moogle Personality
-Edit the `system_prompt` in `lambda_functions/processing_lambda.py`
+Edit `DEFAULT_PERSONALITY` in `lambda_functions/processing/llm_client.py`
 
-### Change OpenAI Model
-Update the `model` parameter in `call_openai()` function (default: gpt-4o-mini)
+### Change Claude Model on Bedrock
+Set `TF_VAR_bedrock_model_id` (or the `bedrock_model_id` Terraform variable)
+to another Anthropic model ID supported by Bedrock — e.g.
+`anthropic.claude-sonnet-4-6`. Default is Claude Haiku 4.5
+(`anthropic.claude-haiku-4-5-20251001-v1:0`).
+
+### Tune Tool Use
+The `ffxi_item_lookup` tool definition lives in
+`lambda_functions/processing/llm_client.py` (`FFXI_ITEM_LOOKUP_TOOL`). Adjust
+the description to tighten/loosen when Claude decides to call it. The lookup
+itself, including the response trimming (`max_vendors`, `max_drops`), is in
+`lambda_functions/processing/ffxi_item_lookup.py`.
 
 ### Change Error Message
-Edit `MOOGLE_ERROR_MESSAGE` in `lambda_functions/processing_lambda.py`
+Edit `ERROR_MESSAGE` in `lambda_functions/processing/slack_client.py`
 
 ## Monitoring
 
@@ -245,9 +288,11 @@ cd tools
 - Check S3 idempotency bucket for request markers
 - Verify S3 lifecycle rules are configured
 
-**OpenAI errors:**
-- Verify `OPENAI_API_KEY` is set correctly
-- Check OpenAI API status and rate limits
+**Bedrock errors:**
+- `AccessDeniedException` on `bedrock:InvokeModel`: enable the chosen Claude model in AWS Console > Bedrock > Model access, in the deployment region
+- `ValidationException` about model ID: verify `BEDROCK_MODEL_ID` env var on the Processing Lambda matches an active Anthropic model
+- Throttling: Bedrock has per-account/region quotas; check CloudWatch and request a quota increase if needed
+- Tool loop errors: check Processing Lambda logs for `Tool call:` / `Tool error:` entries; ffxi_item_lookup hits ffxiclopedia.fandom.com — transient network failures appear as tool errors
 
 **API Gateway / Authorizer not working:**
 - Authorizer Lambda not invoked (no CloudWatch logs): API Gateway deployment may be stale

@@ -54,3 +54,5 @@ Thumbs.db
 .env.local
 *.pem
 *.key
+env.sh
+terraform/terraform.tfvars

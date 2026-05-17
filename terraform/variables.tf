@@ -4,10 +4,10 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-variable "openai_api_key" {
-  description = "OpenAI API key"
+variable "bedrock_model_id" {
+  description = "Bedrock model ID (default: Amazon Nova Lite). Switch to anthropic.claude-haiku-4-5-20251001-v1:0 once Claude model access is approved."
   type        = string
-  sensitive   = true
+  default     = "amazon.nova-lite-v1:0"
 }
 
 variable "slack_signing_secret" {

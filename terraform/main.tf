@@ -12,7 +12,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.21"
     }
   }
 }
@@ -144,6 +144,12 @@ resource "aws_dynamodb_table" "terraform_locks" {
   }
 }
 
+# AgentCore Memory for multi-turn conversation state
+resource "aws_bedrockagentcore_memory" "moogle" {
+  name                          = "${var.project_name}-memory"
+  event_expiry_duration_in_days = 7
+}
+
 # SQS Queue
 resource "aws_sqs_queue" "processing_queue" {
   name                       = "${var.project_name}-processing-queue"
@@ -203,6 +209,28 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "sqs:GetQueueUrl"
         ]
         Resource = aws_sqs_queue.processing_queue.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream"
+        ]
+        Resource = [
+          "arn:aws:bedrock:${data.aws_region.current.name}::foundation-model/${var.bedrock_model_id}",
+          "arn:aws:bedrock:*::foundation-model/anthropic.*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:CreateEvent",
+          "bedrock-agentcore:ListEvents",
+          "bedrock-agentcore:GetEvent",
+          "bedrock-agentcore:DeleteEvent",
+          "bedrock-agentcore:ListSessions"
+        ]
+        Resource = "${aws_bedrockagentcore_memory.moogle.arn}/*"
       }
     ]
   })
@@ -269,6 +297,7 @@ resource "aws_lambda_function" "initial" {
       SLACK_SIGNING_SECRET = var.slack_signing_secret
       SLACK_BOT_TOKEN      = var.slack_bot_token
       LOG_LEVEL            = var.log_level
+      AGENTCORE_MEMORY_ID  = aws_bedrockagentcore_memory.moogle.id
     }
   }
 
@@ -292,11 +321,14 @@ resource "aws_lambda_function" "processing" {
 
   environment {
     variables = {
-      OPENAI_API_KEY        = var.openai_api_key
+      BEDROCK_MODEL_ID      = var.bedrock_model_id
+      BEDROCK_REGION        = var.aws_region
       SLACK_BOT_TOKEN       = var.slack_bot_token
       S3_BUCKET_IDEMPOTENCY = aws_s3_bucket.idempotency.bucket
       SQS_QUEUE_URL         = aws_sqs_queue.processing_queue.url
       LOG_LEVEL             = var.log_level
+      AGENTCORE_MEMORY_ID   = aws_bedrockagentcore_memory.moogle.id
+      SESSION_IDLE_MINUTES  = "30"
     }
   }
 
@@ -618,4 +650,9 @@ output "terraform_state_bucket" {
 output "terraform_locks_table" {
   value       = aws_dynamodb_table.terraform_locks.name
   description = "DynamoDB table for Terraform state locking"
+}
+
+output "agentcore_memory_id" {
+  value       = aws_bedrockagentcore_memory.moogle.id
+  description = "AgentCore Memory ID for multi-turn conversation state"
 }

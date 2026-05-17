@@ -18,10 +18,15 @@ logger = logging.getLogger()
 logger.setLevel(getattr(logging, LOG_LEVEL))
 
 sqs = boto3.client('sqs')
+agentcore = boto3.client(
+    'bedrock-agentcore',
+    region_name=os.environ.get('BEDROCK_REGION') or os.environ.get('AWS_REGION', 'us-east-1')
+)
 
 SQS_QUEUE_URL = os.environ['SQS_QUEUE_URL']
 SLACK_SIGNING_SECRET = os.environ['SLACK_SIGNING_SECRET']
 SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN', '')
+AGENTCORE_MEMORY_ID = os.environ.get('AGENTCORE_MEMORY_ID', '')
 
 def handler(event, context):
     """
@@ -90,16 +95,32 @@ def handler(event, context):
     # Generate request ID
     request_id = generate_request_id(payload)
 
-    # Get channel info
+    # Get channel / user info
     channel_id = payload.get('channel_id') or event_data.get('channel')
     thread_ts = event_data.get('thread_ts') if is_mention else None
+    slack_user_id = payload.get('user_id') or event_data.get('user') or 'unknown'
 
     if LOG_LEVEL == 'DEBUG':
-        logger.debug(f"Channel info - channel_id: {channel_id}, thread_ts: {thread_ts}")
+        logger.debug(f"Channel info - channel_id: {channel_id}, thread_ts: {thread_ts}, user: {slack_user_id}")
 
     if not channel_id:
         logger.error("No channel_id found in payload")
         return {'statusCode': 200, 'body': json.dumps({'error': 'No channel found'})}
+
+    # Compute AgentCore Memory session identifiers
+    actor_id = f"slack:{slack_user_id}"
+    session_id = f"{channel_id}:{thread_ts}" if thread_ts else f"{channel_id}:{slack_user_id}"
+
+    # Handle /moogle reset — clear session and return early (no SQS enqueue)
+    if is_slash_command and payload.get('text', '').strip().lower() == 'reset':
+        logger.info(f"Reset requested for session {session_id!r}")
+        _clear_session_inline(actor_id, session_id)
+        post_slack_message(channel_id, "Kupo! I've forgotten our conversation, kupo! Ask me anything fresh!")
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'text': "Memory cleared, kupo!", 'response_type': 'ephemeral'})
+        }
 
     # Prepare message for SQS
     message = {
@@ -109,7 +130,9 @@ def handler(event, context):
         'channel_id': channel_id,
         'thread_ts': thread_ts,
         'is_mention': is_mention,
-        'is_slash_command': is_slash_command
+        'is_slash_command': is_slash_command,
+        'actor_id': actor_id,
+        'session_id': session_id,
     }
 
     # Send to SQS
@@ -191,6 +214,42 @@ def generate_moogle_thinking_text():
         "Just a second, kupo! I'll find that information for you!"
     ]
     return random.choice(moogle_phrases)
+
+def _clear_session_inline(actor_id: str, session_id: str, cap: int = 200) -> None:
+    """Delete all AgentCore Memory events for a session (for /moogle reset)."""
+    if not AGENTCORE_MEMORY_ID:
+        logger.warning("AGENTCORE_MEMORY_ID not set; reset is a no-op")
+        return
+    try:
+        events = []
+        kwargs = dict(memoryId=AGENTCORE_MEMORY_ID, actorId=actor_id, sessionId=session_id)
+        next_token = None
+        while True:
+            if next_token:
+                kwargs['nextToken'] = next_token
+            resp = agentcore.list_events(**kwargs)
+            events.extend(resp.get('events') or resp.get('memoryEvents') or [])
+            next_token = resp.get('nextToken')
+            if not next_token:
+                break
+
+        if len(events) > cap:
+            logger.warning(f"Session has {len(events)} events; deleting first {cap} only")
+            events = events[:cap]
+
+        for ev in events:
+            event_id = ev.get('eventId') or ev.get('id')
+            if event_id:
+                agentcore.delete_event(
+                    memoryId=AGENTCORE_MEMORY_ID,
+                    actorId=actor_id,
+                    sessionId=session_id,
+                    eventId=event_id,
+                )
+        logger.info(f"Cleared {len(events)} events from session {session_id!r}")
+    except Exception as e:
+        logger.error(f"Error clearing session {session_id!r}: {e}")
+
 
 def post_slack_message(channel_id, text, thread_ts=None):
     """Post a message to Slack using chat.postMessage API."""
