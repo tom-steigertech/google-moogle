@@ -8,6 +8,7 @@ The tool-use loop runs until the model returns a final text response
 
 import logging
 import os
+import re
 
 import boto3
 
@@ -245,10 +246,13 @@ def _to_converse_messages(messages: list) -> list:
     return result
 
 
+_THINKING_RE = re.compile(r"<thinking>.*?</thinking>", re.DOTALL | re.IGNORECASE)
+
 def _extract_text(content_blocks: list) -> str:
     """Pull all text blocks out of a Converse response content list."""
     parts = []
     for block in content_blocks:
         if "text" in block and block["text"]:
             parts.append(block["text"])
-    return "\n".join(parts).strip()
+    text = "\n".join(parts).strip()
+    return _THINKING_RE.sub("", text).strip()
