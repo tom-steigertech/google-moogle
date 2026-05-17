@@ -115,8 +115,13 @@ def handler(event, context):
         return {'statusCode': 200, 'body': json.dumps({'error': 'No channel found'})}
 
     # Compute AgentCore Memory session identifiers
-    actor_id = f"slack:{slack_user_id}"
-    session_id = f"{channel_id}:{thread_ts}" if thread_ts else f"{channel_id}:{slack_user_id}"
+    # IDs must match [a-zA-Z0-9][a-zA-Z0-9-_]* — replace colons and dots with underscores
+    actor_id = f"slack_{slack_user_id}"
+    if thread_ts:
+        safe_ts = thread_ts.replace(".", "_")
+        session_id = f"{channel_id}_{safe_ts}"
+    else:
+        session_id = f"{channel_id}_{slack_user_id}"
 
     # For thread replies, only respond if a prior conversation exists in this thread
     if is_thread_reply and not _session_has_memory(actor_id, session_id):

@@ -69,15 +69,14 @@ def _event_to_message(event: dict) -> Optional[dict]:
             return None
 
     for item in (payload if isinstance(payload, list) else []):
-        conv = item.get("conversationHistory", {})
-        for msg in conv.get("messages", []):
-            role_raw = msg.get("role", "").lower()
-            if role_raw not in ("user", "assistant"):
-                continue
-            content_blocks = msg.get("content", [])
-            text = " ".join(c.get("text", "") for c in content_blocks if isinstance(c, dict)).strip()
-            if text:
-                return {"role": role_raw, "content": text}
+        conv = item.get("conversational", {})
+        role_raw = conv.get("role", "").lower()
+        if role_raw not in ("user", "assistant"):
+            continue
+        content_blocks = conv.get("content", [])
+        text = " ".join(c.get("text", "") for c in content_blocks if isinstance(c, dict)).strip()
+        if text:
+            return {"role": role_raw, "content": text}
     return None
 
 
@@ -139,11 +138,9 @@ def save_turn(memory_id: str, actor_id: str, session_id: str,
             sessionId=session_id,
             eventTimestamp=datetime.now(tz=timezone.utc),
             payload=[{
-                "conversationHistory": {
-                    "messages": [{
-                        "role": role_api,
-                        "content": [{"text": content}]
-                    }]
+                "conversational": {
+                    "role": role_api,
+                    "content": [{"text": content}]
                 }
             }]
         )
