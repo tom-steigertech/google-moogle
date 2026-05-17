@@ -85,19 +85,26 @@ def handler(event, context):
             'body': json.dumps({'challenge': payload['challenge']})
         }
 
-    # Determine if this is an @mention event or slash command
+    # Determine if this is an @mention, thread reply, or slash command
     event_data = payload.get('event', {})
-    is_mention = event_data.get('type') == 'app_mention'
+    event_type = event_data.get('type')
+    is_mention = event_type == 'app_mention'
+    is_thread_reply = (
+        event_type == 'message'
+        and event_data.get('thread_ts') is not None
+        and event_data.get('bot_id') is None
+        and event_data.get('subtype') is None
+    )
     is_slash_command = payload.get('command') is not None
 
-    logger.info(f"Request type - is_mention: {is_mention}, is_slash_command: {is_slash_command}")
+    logger.info(f"Request type - is_mention: {is_mention}, is_thread_reply: {is_thread_reply}, is_slash_command: {is_slash_command}")
 
     # Generate request ID
     request_id = generate_request_id(payload)
 
     # Get channel / user info
     channel_id = payload.get('channel_id') or event_data.get('channel')
-    thread_ts = event_data.get('thread_ts') if is_mention else None
+    thread_ts = event_data.get('thread_ts') if (is_mention or is_thread_reply) else None
     slack_user_id = payload.get('user_id') or event_data.get('user') or 'unknown'
 
     if LOG_LEVEL == 'DEBUG':
@@ -110,6 +117,11 @@ def handler(event, context):
     # Compute AgentCore Memory session identifiers
     actor_id = f"slack:{slack_user_id}"
     session_id = f"{channel_id}:{thread_ts}" if thread_ts else f"{channel_id}:{slack_user_id}"
+
+    # For thread replies, only respond if a prior conversation exists in this thread
+    if is_thread_reply and not _session_has_memory(actor_id, session_id):
+        logger.info(f"Thread reply ignored — no prior session in {session_id!r}")
+        return {'statusCode': 200, 'body': json.dumps({'ok': True})}
 
     # Handle /moogle reset — clear session and return early (no SQS enqueue)
     if is_slash_command and payload.get('text', '').strip().lower() == 'reset':
@@ -214,6 +226,23 @@ def generate_moogle_thinking_text():
         "Just a second, kupo! I'll find that information for you!"
     ]
     return random.choice(moogle_phrases)
+
+def _session_has_memory(actor_id: str, session_id: str) -> bool:
+    """Return True if AgentCore Memory has at least one event for this session."""
+    if not AGENTCORE_MEMORY_ID:
+        return False
+    try:
+        resp = agentcore.list_events(
+            memoryId=AGENTCORE_MEMORY_ID,
+            actorId=actor_id,
+            sessionId=session_id,
+        )
+        events = resp.get('events') or resp.get('memoryEvents') or []
+        return len(events) > 0
+    except Exception as e:
+        logger.error(f"Error checking session memory: {e}")
+        return False
+
 
 def _clear_session_inline(actor_id: str, session_id: str, cap: int = 200) -> None:
     """Delete all AgentCore Memory events for a session (for /moogle reset)."""

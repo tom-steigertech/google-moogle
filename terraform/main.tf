@@ -6,7 +6,7 @@ terraform {
     key            = "terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "ff-moogle-bot-terraform-locks"
+    use_lockfile   = true
   }
 
   required_providers {
@@ -146,8 +146,8 @@ resource "aws_dynamodb_table" "terraform_locks" {
 
 # AgentCore Memory for multi-turn conversation state
 resource "aws_bedrockagentcore_memory" "moogle" {
-  name                          = "${var.project_name}-memory"
-  event_expiry_duration_in_days = 7
+  name                          = "${replace(var.project_name, "-", "_")}_memory"
+  event_expiry_duration = 7
 }
 
 # SQS Queue
@@ -217,7 +217,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "bedrock:InvokeModelWithResponseStream"
         ]
         Resource = [
-          "arn:aws:bedrock:${data.aws_region.current.name}::foundation-model/${var.bedrock_model_id}",
+          "arn:aws:bedrock:${data.aws_region.current.region}::foundation-model/${var.bedrock_model_id}",
           "arn:aws:bedrock:*::foundation-model/anthropic.*"
         ]
       },
@@ -328,7 +328,7 @@ resource "aws_lambda_function" "processing" {
       SQS_QUEUE_URL         = aws_sqs_queue.processing_queue.url
       LOG_LEVEL             = var.log_level
       AGENTCORE_MEMORY_ID   = aws_bedrockagentcore_memory.moogle.id
-      SESSION_IDLE_MINUTES  = "30"
+      SESSION_IDLE_MINUTES  = "10"
     }
   }
 

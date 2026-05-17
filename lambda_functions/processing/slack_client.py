@@ -7,10 +7,12 @@ import requests
 
 class MoogleSlackClient:
     """Encapsulates Slack Web API interactions for the Moogle bot.
-    
+
     Handles sending messages to Slack channels and threads.
     """
-    
+
+    DROPS_INLINE = 5  # max drop sources shown in the card; remainder goes in a thread
+
     # Error message template for when things go wrong
     ERROR_MESSAGE = """Kupo... I ran into an issue with the Moogle Magic! 
 
@@ -79,8 +81,7 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
             'text': text
         }
         
-        # Only add thread_ts for mention responses in threads
-        if is_mention and thread_ts:
+        if thread_ts:
             data['thread_ts'] = thread_ts
         
         self.logger.debug(f"Sending message to channel {channel_id}")
@@ -129,7 +130,7 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
             'blocks': blocks,
             'text': text,
         }
-        if is_mention and thread_ts:
+        if thread_ts:
             data['thread_ts'] = thread_ts
 
         self.logger.debug(f"Sending blocks to channel {channel_id} ({len(blocks)} blocks)")
@@ -169,7 +170,6 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
 
         blocks = []
         name = item_data.get("name", "Unknown Item")
-        url = item_data.get("url", "")
 
         # Header
         blocks.append({
@@ -192,8 +192,6 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
             meta_parts.append(f"*Flags:* {', '.join(flags)}")
 
         meta_text = "  |  ".join(meta_parts) if meta_parts else ""
-        if url:
-            meta_text = (meta_text + "\n" if meta_text else "") + f"<{url}|View on FFXIclopedia →>"
         if meta_text:
             blocks.append({
                 "type": "section",
@@ -223,44 +221,68 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
                 "text": {"type": "mrkdwn", "text": "\n".join(lines)}
             })
 
-        # Drops
+        # Drops — show up to DROPS_INLINE inline; full list goes in a thread
         drops = item_data.get("drops", [])
         if drops:
             blocks.append({"type": "divider"})
             drops_total = item_data.get("drops_total", len(drops))
             drops_truncated = item_data.get("drops_truncated", False)
-            VISIBLE = 5
-            visible = drops[:VISIBLE]
-            hidden = drops[VISIBLE:]
-
             plural = "source" if drops_total == 1 else "sources"
+            needs_thread = len(drops) > MoogleSlackClient.DROPS_INLINE or drops_truncated
+
             lines = [f"*Dropped by* ({drops_total} {plural}):"]
-            for d in visible:
+            for d in drops[:MoogleSlackClient.DROPS_INLINE]:
                 monster = d.get("monster") or "?"
                 zone = d.get("zone") or ""
                 lines.append(f"• {monster}" + (f"  _{zone}_" if zone else ""))
+            if needs_thread:
+                lines.append("_See thread for full list ↓_")
             blocks.append({
                 "type": "section",
                 "text": {"type": "mrkdwn", "text": "\n".join(lines)}
             })
 
-            if hidden or drops_truncated:
-                shown = len(visible)
-                remaining = drops_total - shown
-                hidden_names = [d.get("monster", "?") for d in hidden]
-                if hidden_names:
-                    more_text = f"+{remaining} more: {', '.join(hidden_names)}"
-                    if drops_truncated:
-                        extra = drops_total - len(drops)
-                        if extra > 0:
-                            more_text += f"  _( +{extra} not shown)_"
-                else:
-                    more_text = f"+{remaining} more drop sources"
-                blocks.append({
-                    "type": "context",
-                    "elements": [{"type": "mrkdwn", "text": more_text}]
-                })
+        return blocks
 
+    @staticmethod
+    def format_drops_thread(item_data: dict) -> list:
+        """Build blocks for the full drop list, for posting as a thread reply on the item card."""
+        drops = item_data.get("drops", [])
+        if not drops:
+            return []
+
+        drops_total = item_data.get("drops_total", len(drops))
+        drops_truncated = item_data.get("drops_truncated", False)
+        plural = "source" if drops_total == 1 else "sources"
+        name = item_data.get("name", "this item")
+
+        drop_lines = []
+        for d in drops:
+            monster = d.get("monster") or "?"
+            zone = d.get("zone") or ""
+            drop_lines.append(f"• {monster}" + (f"  _{zone}_" if zone else ""))
+        if drops_truncated:
+            extra = drops_total - len(drops)
+            if extra > 0:
+                drop_lines.append(f"_( +{extra} additional sources not shown)_")
+
+        header = f"*All drop sources for {name}* ({drops_total} {plural}):"
+        blocks = []
+        current_lines = [header]
+        for line in drop_lines:
+            if len("\n".join(current_lines + [line])) > 2800:
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "\n".join(current_lines)}
+                })
+                current_lines = [line]
+            else:
+                current_lines.append(line)
+        if current_lines:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "\n".join(current_lines)}
+            })
         return blocks
 
     def send_error_message(self, channel_id: str, thread_ts: str = None,
