@@ -61,17 +61,24 @@ def _parse_ts(event: dict) -> datetime:
 
 def _event_to_message(event: dict) -> Optional[dict]:
     """Convert a raw AgentCore event to a Claude messages-array entry."""
-    payload_str = event.get("payload") or event.get("content") or ""
-    try:
-        payload = json.loads(payload_str) if isinstance(payload_str, str) else payload_str
-    except (json.JSONDecodeError, TypeError):
-        payload = {"role": "user", "content": str(payload_str)}
+    payload = event.get("payload") or []
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            return None
 
-    role = payload.get("role")
-    content = payload.get("content")
-    if role not in ("user", "assistant") or not content:
-        return None
-    return {"role": role, "content": content}
+    for item in (payload if isinstance(payload, list) else []):
+        conv = item.get("conversationHistory", {})
+        for msg in conv.get("messages", []):
+            role_raw = msg.get("role", "").lower()
+            if role_raw not in ("user", "assistant"):
+                continue
+            content_blocks = msg.get("content", [])
+            text = " ".join(c.get("text", "") for c in content_blocks if isinstance(c, dict)).strip()
+            if text:
+                return {"role": role_raw, "content": text}
+    return None
 
 
 def load_recent_turns(memory_id: str, actor_id: str, session_id: str,
@@ -124,13 +131,21 @@ def load_recent_turns(memory_id: str, actor_id: str, session_id: str,
 def save_turn(memory_id: str, actor_id: str, session_id: str,
               role: str, content: str) -> None:
     """Persist a single conversation turn (user or assistant) to AgentCore Memory."""
-    payload = json.dumps({"role": role, "content": content})
+    role_api = "USER" if role == "user" else "ASSISTANT"
     try:
         _client().create_event(
             memoryId=memory_id,
             actorId=actor_id,
             sessionId=session_id,
-            payload=payload,
+            eventTimestamp=datetime.now(tz=timezone.utc),
+            payload=[{
+                "conversationHistory": {
+                    "messages": [{
+                        "role": role_api,
+                        "content": [{"text": content}]
+                    }]
+                }
+            }]
         )
         logger.debug(f"Saved {role} turn to session {session_id!r}")
     except Exception as e:

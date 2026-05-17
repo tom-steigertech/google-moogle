@@ -230,7 +230,10 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "bedrock-agentcore:DeleteEvent",
           "bedrock-agentcore:ListSessions"
         ]
-        Resource = "${aws_bedrockagentcore_memory.moogle.arn}/*"
+        Resource = [
+          aws_bedrockagentcore_memory.moogle.arn,
+          "${aws_bedrockagentcore_memory.moogle.arn}/*"
+        ]
       }
     ]
   })
