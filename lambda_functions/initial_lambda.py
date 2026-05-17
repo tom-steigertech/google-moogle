@@ -117,16 +117,25 @@ def handler(event, context):
     # Compute AgentCore Memory session identifiers
     # IDs must match [a-zA-Z0-9][a-zA-Z0-9-_]* — replace colons and dots with underscores
     actor_id = f"slack_{slack_user_id}"
+    user_session_id = f"{channel_id}_{slack_user_id}"
     if thread_ts:
         safe_ts = thread_ts.replace(".", "_")
         session_id = f"{channel_id}_{safe_ts}"
     else:
-        session_id = f"{channel_id}_{slack_user_id}"
+        session_id = user_session_id
 
-    # For thread replies, only respond if a prior conversation exists in this thread
-    if is_thread_reply and not _session_has_memory(actor_id, session_id):
-        logger.info(f"Thread reply ignored — no prior session in {session_id!r}")
-        return {'statusCode': 200, 'body': json.dumps({'ok': True})}
+    # For thread-based interactions, resolve the best session to use.
+    # If the thread session has no memory, fall back to the user's main-channel
+    # session — this handles the common case of @mention in the channel followed
+    # by a thread reply to the bot's response (different thread_ts, same conversation).
+    if thread_ts and not _session_has_memory(actor_id, session_id):
+        if session_id != user_session_id and _session_has_memory(actor_id, user_session_id):
+            logger.info(f"Thread resolved to user session {user_session_id!r}")
+            session_id = user_session_id
+        elif is_thread_reply:
+            # No memory in thread session or user session — unrelated thread, ignore.
+            logger.info(f"Thread reply ignored — no prior session in {session_id!r}")
+            return {'statusCode': 200, 'body': json.dumps({'ok': True})}
 
     # Handle /moogle reset — clear session and return early (no SQS enqueue)
     if is_slash_command and payload.get('text', '').strip().lower() == 'reset':
