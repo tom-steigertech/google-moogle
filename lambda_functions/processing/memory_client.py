@@ -48,7 +48,7 @@ def _client():
 
 def _parse_ts(event: dict) -> datetime:
     """Parse the event timestamp to a timezone-aware datetime."""
-    raw = event.get("timestamp") or event.get("createdAt") or ""
+    raw = event.get("eventTimestamp") or event.get("timestamp") or event.get("createdAt") or ""
     if isinstance(raw, datetime):
         return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
     if isinstance(raw, (int, float)):
