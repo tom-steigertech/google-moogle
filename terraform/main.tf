@@ -331,7 +331,7 @@ resource "aws_lambda_function" "processing" {
       SQS_QUEUE_URL         = aws_sqs_queue.processing_queue.url
       LOG_LEVEL             = var.log_level
       AGENTCORE_MEMORY_ID   = aws_bedrockagentcore_memory.moogle.id
-      SESSION_IDLE_MINUTES  = "10"
+      SESSION_IDLE_MINUTES  = "60"
     }
   }
 
