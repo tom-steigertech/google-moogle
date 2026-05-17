@@ -136,34 +136,38 @@ def handler(event, context):
             answer, item_lookups = llm_client.generate_response(messages)
             logger.info(f"Bedrock response received, length: {len(answer)}, item_lookups: {len(item_lookups)}")
 
-            # Post item data cards first (found items only; LLM handles not-found)
+            # Post item data cards first (found items only; LLM handles not-found).
+            # Non-fatal: a card failure shouldn't block the flavor text or memory save.
             for item_data in item_lookups:
                 if item_data.get("found"):
                     blocks = slack_client.format_item_card(item_data)
                     if blocks:
                         item_name = item_data.get("name", "Item")
                         logger.info(f"Posting item card for: {item_name}")
-                        card_resp = slack_client.send_blocks(
-                            channel_id=channel_id,
-                            blocks=blocks,
-                            text=f"Item data: {item_name}",
-                            thread_ts=thread_ts,
-                            is_mention=is_mention,
-                        )
-                        # If drops overflow the card, post the full list in a thread on the card
-                        drops = item_data.get("drops", [])
-                        if len(drops) > MoogleSlackClient.DROPS_INLINE or item_data.get("drops_truncated"):
-                            card_ts = card_resp.get("ts") if card_resp else None
-                            if card_ts:
-                                drop_blocks = slack_client.format_drops_thread(item_data)
-                                if drop_blocks:
-                                    logger.info(f"Posting full drop list thread for: {item_name}")
-                                    slack_client.send_blocks(
-                                        channel_id=channel_id,
-                                        blocks=drop_blocks,
-                                        text=f"Full drop list for {item_name}",
-                                        thread_ts=card_ts,
-                                    )
+                        try:
+                            card_resp = slack_client.send_blocks(
+                                channel_id=channel_id,
+                                blocks=blocks,
+                                text=f"Item data: {item_name}",
+                                thread_ts=thread_ts,
+                                is_mention=is_mention,
+                            )
+                            # If drops overflow the card, post the full list in a thread on the card
+                            drops = item_data.get("drops", [])
+                            if len(drops) > MoogleSlackClient.DROPS_INLINE or item_data.get("drops_truncated"):
+                                card_ts = card_resp.get("ts") if card_resp else None
+                                if card_ts:
+                                    drop_blocks = slack_client.format_drops_thread(item_data)
+                                    if drop_blocks:
+                                        logger.info(f"Posting full drop list thread for: {item_name}")
+                                        slack_client.send_blocks(
+                                            channel_id=channel_id,
+                                            blocks=drop_blocks,
+                                            text=f"Full drop list for {item_name}",
+                                            thread_ts=card_ts,
+                                        )
+                        except Exception as card_err:
+                            logger.error(f"Failed to post item card for {item_name}: {card_err}")
 
             # Send Moogle flavor text response
             logger.info("Sending response to Slack")
