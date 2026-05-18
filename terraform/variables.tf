@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "bedrock_model_id" {
   description = "Bedrock model ID (default: Amazon Nova Lite). Switch to us.anthropic.claude-haiku-4-5-20251001-v1:0 (cross-region inference profile) once Claude Haiku 4.5 Marketplace access is approved in Bedrock."
   type        = string
-  default     = "amazon.nova-lite-v1:0"
+  default     = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 
 variable "slack_signing_secret" {
