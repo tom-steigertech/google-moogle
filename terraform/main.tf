@@ -695,6 +695,36 @@ resource "aws_sns_topic" "runaway_alarm" {
   name = "${var.project_name}-runaway-alarm"
 }
 
+resource "aws_sns_topic_policy" "runaway_alarm" {
+  arn = aws_sns_topic.runaway_alarm.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowCloudWatchPublish"
+        Effect    = "Allow"
+        Principal = { Service = "cloudwatch.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.runaway_alarm.arn
+        Condition = {
+          StringEquals = { "AWS:SourceAccount" = data.aws_caller_identity.current.account_id }
+        }
+      },
+      {
+        Sid       = "AllowBudgetsPublish"
+        Effect    = "Allow"
+        Principal = { Service = "budgets.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.runaway_alarm.arn
+        Condition = {
+          StringEquals = { "AWS:SourceAccount" = data.aws_caller_identity.current.account_id }
+        }
+      }
+    ]
+  })
+}
+
 resource "aws_lambda_permission" "throttle_sns" {
   statement_id  = "AllowSNSInvoke"
   action        = "lambda:InvokeFunction"
@@ -789,7 +819,7 @@ resource "aws_chatbot_slack_channel_configuration" "code_testing" {
   iam_role_arn       = aws_iam_role.chatbot.arn
   slack_team_id      = var.slack_chatbot_workspace_id
   slack_channel_id   = var.slack_chatbot_channel_id
-  sns_topic_arns     = [aws_sns_topic.notifications.arn]
+  sns_topic_arns     = [aws_sns_topic.notifications.arn, aws_sns_topic.runaway_alarm.arn]
 
   depends_on = [aws_iam_role_policy_attachment.chatbot_readonly]
 }

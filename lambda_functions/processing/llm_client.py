@@ -13,10 +13,11 @@ import re
 import boto3
 
 from .ffxi_item_lookup import lookup_as_tool_result
+from .ffxi_wiki_search import search_as_tool_result as wiki_search
 
 
 DEFAULT_MODEL_ID = "amazon.nova-lite-v1:0"
-MAX_TOOL_ITERATIONS = 4
+MAX_TOOL_ITERATIONS = 6
 
 # Tool definition in Converse API toolSpec format.
 FFXI_ITEM_LOOKUP_TOOL = {
@@ -49,6 +50,40 @@ FFXI_ITEM_LOOKUP_TOOL = {
     }
 }
 
+FFXI_WIKI_SEARCH_TOOL = {
+    "toolSpec": {
+        "name": "ffxi_wiki_search",
+        "description": (
+            "Search for Final Fantasy XI information about quests, missions, "
+            "jobs, abilities, spells, monsters, zones, NPCs, game mechanics, or any "
+            "general FFXI topic. Searches BG-Wiki first, then falls back to FFXIclopedia "
+            "automatically. Call this whenever the user asks about something "
+            "you are not fully certain about — quest steps, mission walkthroughs, job "
+            "ability details, spell requirements, NPC locations, etc. Prefer looking "
+            "it up over answering from memory. Do NOT use for item price/vendor/drop "
+            "lookups — use ffxi_item_lookup for those instead."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Search terms for the FFXI topic, e.g. "
+                            "'Red Mage artifact armor quest', "
+                            "'Monk Formless Strikes ability', "
+                            "'Chains of Promathia mission 3-5'."
+                        ),
+                    }
+                },
+                "required": ["query"],
+            }
+        },
+    }
+}
+
+
 
 class MoogleLLMClient:
     """Encapsulates Bedrock Converse API interactions for the Moogle bot."""
@@ -65,11 +100,13 @@ Your personality traits:
 
 Answer questions about the Final Fantasy XI game, characters, storylines, gameplay mechanics, and lore. Be thorough but keep responses concise (under 2000 characters for Slack).
 
-When the user asks about a specific FFXI item (its price, vendors, drops, or flags), call the ffxi_item_lookup tool instead of answering from memory - it returns authoritative wiki data.
+You have two tools — always prefer them over answering from memory:
 
-IMPORTANT: When the ffxi_item_lookup tool is called and the item IS found, a formatted data card with all the stats (flags, type, vendors, drop sources) will be posted automatically to Slack. Do NOT list, describe, or repeat any of those stats in your response. Instead, reply with 1-2 sentences of Moogle flavor only - enthusiasm, a fun fact about the item, or whimsical commentary - without referencing specific numbers, prices, or locations from the tool result.
+1. ffxi_item_lookup: Use when the user asks about a specific item's price, vendors, drop sources, or flags. A formatted card is posted to Slack automatically — do NOT repeat the stats. Reply with 1-2 sentences of Moogle flavor only. If the item is NOT found, say so in Moogle voice.
 
-If the item is NOT found, respond naturally in Moogle voice that you couldn't locate it, kupo!
+2. ffxi_wiki_search: Use for any FFXI question you are not fully certain about — quests, missions, job abilities, spells, monsters, zones, NPCs, game mechanics, lore. This searches BG-Wiki and falls back to FFXIclopedia automatically. Search first, then answer using the content returned.
+
+Do not guess when you can look it up, kupo!
 
 Remember: Stay in character as a Moogle!"""
 
@@ -163,7 +200,7 @@ Remember: Stay in character as a Moogle!"""
 
     def _invoke(self, converse_messages: list, max_tokens: int, temperature: float,
                 force_tool: bool = False) -> dict:
-        tool_config: dict = {"tools": [FFXI_ITEM_LOOKUP_TOOL]}
+        tool_config: dict = {"tools": [FFXI_ITEM_LOOKUP_TOOL, FFXI_WIKI_SEARCH_TOOL]}
         if force_tool:
             tool_config["toolChoice"] = {"any": {}}
         try:
@@ -221,6 +258,11 @@ Remember: Stay in character as a Moogle!"""
             if not item_name:
                 return {"found": False, "error": "item_name is required"}
             return lookup_as_tool_result(item_name)
+        if name == "ffxi_wiki_search":
+            query = (tool_input or {}).get("query", "").strip()
+            if not query:
+                return {"found": False, "error": "query is required"}
+            return wiki_search(query)
         raise ValueError(f"Unknown tool: {name}")
 
     def set_personality(self, prompt: str):
