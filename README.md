@@ -1,224 +1,252 @@
 # Final Fantasy Moogle Slack Bot
 
-A serverless Slack bot that answers Final Fantasy questions with the personality of a Moogle, built with AWS Lambda, API Gateway, SQS, and Claude on Amazon Bedrock. Claude uses tool calling to fetch FFXI item data directly from FFXIclopedia, saving inference tokens when users ask about specific items.
+A serverless Slack bot that answers Final Fantasy XI questions with the personality of a Moogle. Built on AWS Lambda, API Gateway, SQS, and Claude on Amazon Bedrock. The bot uses tool calling to fetch live data from FFXI wikis and display structured item cards in Slack, rather than hallucinating from training data.
 
 ## Architecture
 
 ```
-Slack → API Gateway → Lambda Authorizer (API key validation - prevents abuse)
+Slack → API Gateway → Lambda Authorizer (API key validation)
                          ↓
-              Initial Lambda (Slack signature validation + enqueue + immediate "thinking" response via chat.postMessage)
+              Initial Lambda
+              - Slack signature validation
+              - Posts "thinking..." message immediately via chat.postMessage
+              - Enqueues work to SQS
                          ↓
-                         SQS
+                        SQS
                          ↓
-               Processing Lambda (idempotency check + Claude on Bedrock + ffxi_item_lookup tool + Slack response via chat.postMessage)
+               Processing Lambda
+               - Idempotency check (S3)
+               - Claude Haiku 4.5 on Bedrock + tool-use loop
+               - Posts final answer to Slack via chat.postMessage
                          ↓
                         Slack
 ```
 
-**Security Layers:**
-1. **Lambda Authorizer**: Validates API key query parameter (prevents non-Slack callers from hitting the endpoint)
-2. **Initial Lambda**: Validates Slack signature in headers (ensures request actually came from Slack)
-3. **Processing Lambda**: Idempotency check prevents duplicate processing from Slack retries
+**Security layers:**
+1. **Lambda Authorizer** — validates `?api_key=` query parameter; rejects non-Slack callers before they reach any Lambda
+2. **Initial Lambda** — validates Slack HMAC signature; ensures requests actually came from Slack
+3. **Processing Lambda** — idempotency check prevents duplicate processing from Slack retries
 
-**Key Features:**
-- **Multi-turn conversations**: Bot remembers conversation context within a 30-minute idle window. Works in Slack threads and top-level @mentions. Powered by Amazon Bedrock AgentCore Memory.
-- **Unified Flow**: Both @mentions and slash commands follow the same pattern: immediate "thinking" message via Web API, then async processing
-- **Async Processing**: Initial Lambda responds immediately by posting a "thinking" Moogle message via `chat.postMessage`, processing happens asynchronously
-- **Error Handling**: Processing Lambda catches all errors and posts a friendly Moogle-style error message to Slack
-- **Idempotency**: S3-based deduplication with 1-day TTL in the processing Lambda prevents duplicate work from Slack retries
-- **Security**: Lambda Authorizer validates API Gateway API key (sent as query parameter)
-- **Personality**: Responds as a cheerful Moogle from the Final Fantasy series
+**LLM tools (Claude decides when to call these):**
+| Tool | When used | Source |
+|------|-----------|--------|
+| `ffxi_item_lookup` | User asks about a specific item's price, vendors, or drop sources | FFXIclopedia (Fandom wiki) |
+| `ffxi_wiki_search` | Any FFXI question about quests, jobs, spells, zones, NPCs, mechanics | BG-Wiki → FFXIclopedia fallback |
+
+When `ffxi_item_lookup` succeeds, a formatted item card is posted to Slack and the LLM's flavor text is suppressed. When it fails, the LLM replies in Moogle voice. Wiki search content is fed back to the LLM to answer the question.
+
+**Cost controls:**
+- **Runaway circuit breaker** — CloudWatch alarm fires when the initial Lambda is invoked ≥ 30 times/minute (runaway loop or abuse); sets reserved concurrency to 0, causing API Gateway to return 429 without invoking Lambda
+- **Budget circuit breaker** — When monthly spend hits 100% of the $10 budget, the same throttle Lambda fires
+- Both triggers also post a Slack notification to `#code-testing` via AWS Chatbot
+- Recovery: `aws lambda delete-function-concurrency --function-name ff-moogle-bot-initial --region us-east-1`
+
+## Key Features
+
+- **Multi-turn conversations** — Bot remembers conversation context within a 10-minute idle window, scoped per user per channel. Powered by Amazon Bedrock AgentCore Memory.
+- **Async processing** — Initial Lambda responds immediately with a "thinking" message; heavy work happens in the processing Lambda triggered by SQS
+- **Two-wiki search** — BG-Wiki searched first; automatically falls back to FFXIclopedia when BG-Wiki has no content
+- **Idempotency** — S3-based deduplication (1-day TTL) prevents duplicate responses from Slack retries
+- **Runaway + budget protection** — Dual circuit breakers with Slack alerting via AWS Chatbot
 
 ## Prerequisites
 
-- AWS CLI configured with appropriate credentials
+- AWS CLI configured with appropriate credentials (us-east-1)
 - Terraform >= 1.0
 - Python 3.11
-- Amazon Bedrock model access enabled for Anthropic Claude models (AWS Console > Bedrock > Model access)
-- Slack app with:
-  - Bot token (`xoxb-...`)
-  - Signing secret
-  - Event subscriptions AND/OR slash commands enabled
+- Amazon Bedrock model access enabled for **Claude Haiku 4.5** via cross-region inference profile (`us.anthropic.claude-haiku-4-5-20251001-v1:0`) — enable in AWS Console > Bedrock > Model access
+- Slack app with bot token (`xoxb-...`), signing secret, and Event Subscriptions + Slash Commands enabled
 
 ## Setup
 
-### 1. Build Lambda Packages
+### 1. Build Lambda packages
 
 ```bash
 chmod +x build.sh
 ./build.sh
 ```
 
-This creates:
-- `lambda_functions/layer.zip` - Python dependencies (boto3, requests, beautifulsoup4)
-- `lambda_functions/authorizer.zip` - API key validator
-- `lambda_functions/initial_lambda.zip` - Parse request, post thinking message, enqueue to SQS
-- `lambda_functions/processing_lambda.zip` - Idempotency check, Claude-on-Bedrock + tool use, post final response
+Creates:
+- `lambda_functions/layer.zip` — Python dependencies (boto3, requests, beautifulsoup4)
+- `lambda_functions/authorizer.zip` — API key validator
+- `lambda_functions/initial_lambda.zip` — Slack request parsing + enqueue
+- `lambda_functions/processing_lambda.zip` — Idempotency + LLM + tool use + Slack response
 
-### 2. Configure Secrets
+### 2. Configure secrets
+
+Copy `env.sh.example` (or create `env.sh`) and fill in your values:
 
 ```bash
 export TF_VAR_slack_signing_secret='your-slack-signing-secret'
 export TF_VAR_slack_bot_token='xoxb-your-bot-token'
 
-# Optional: override the default Claude Haiku 4.5 model
-# export TF_VAR_bedrock_model_id='anthropic.claude-haiku-4-5-20251001-v1:0'
+source env.sh
 ```
 
-> The Lambda IAM role handles Bedrock + AgentCore auth — no API keys needed.
-> Ensure Bedrock model access is enabled in the deployment region.
+The Lambda IAM role handles Bedrock and AgentCore auth — no additional API keys needed.
 
-### 2.5 Bump Terraform provider
-
-The `hashicorp/aws` provider must be `~> 6.21` for `aws_bedrockagentcore_memory`.
-Run `terraform init -upgrade` once to upgrade from `~> 5.x`.
-
-### 3. Deploy Infrastructure
+### 3. Deploy
 
 ```bash
 cd terraform
 terraform init
-terraform plan
 terraform apply
 ```
 
-### 4. Configure Slack App
+On first run, `terraform init -upgrade` may be needed to pull `hashicorp/aws ~> 6.21` (required for `aws_bedrockagentcore_memory`).
 
-After deployment, Terraform will output the API Gateway URLs. You must append your API key as a query parameter:
+### 4. Configure Slack app
 
-#### For @mentions (Events API):
+After deployment, Terraform outputs the API Gateway URLs. Append your API key as a query parameter to each URL — Slack can only send custom data via URL parameters, not custom headers.
+
+#### Event Subscriptions (@mentions)
 ```
-https://xxxxx.execute-api.us-east-1.amazonaws.com/prod/googlemoogle/events?api_key=YOUR_API_KEY
+https://xxxxx.execute-api.us-east-1.amazonaws.com/prod/googlemoogle/events?api_key=YOUR_KEY
 ```
+- Enable Event Subscriptions in the Slack app settings
+- Subscribe to bot event: `app_mention`
+- Required OAuth scopes: `chat:write`, `app_mentions:read`
 
-Configure in Slack:
-1. **Event Subscriptions**: Enable and set Request URL to the above
-2. **Subscribe to bot events**: Add `app_mention`
-3. **OAuth & Permissions**: Ensure your bot has `chat:write` and `app_mentions:read` scopes
-
-#### For Slash Commands:
+#### Slash Commands
 ```
-https://xxxxx.execute-api.us-east-1.amazonaws.com/prod/googlemoogle/slash?api_key=YOUR_API_KEY
+https://xxxxx.execute-api.us-east-1.amazonaws.com/prod/googlemoogle/slash?api_key=YOUR_KEY
 ```
-
-Configure in Slack:
-1. **Slash Commands**: Create a new command (e.g., `/moogle`)
-2. Set Request URL to the above
-3. Add usage hint: "Ask a Final Fantasy question"
-
-**Important**: The API key must be provided as a query parameter (`?api_key=your-key`) since Slack can only send custom data via URL parameters, not custom headers.
+- Create a new slash command (e.g. `/moogle`) pointing to the above URL
+- Required OAuth scope: `chat:write`
 
 ## Usage
 
-Once configured, users can:
+### @mention
+```
+@GoogleMoogle Where do I get a Beehive Chip?
+```
+The bot posts a "thinking..." message immediately, then posts an item card plus a Moogle-flavored reply.
 
-### 1. Mention the bot:
+### Slash command
 ```
-@GoogleMoogle Who is Cloud Strife?
+/moogle How do I unlock Blue Mage?
 ```
-The bot will immediately post a "thinking" message in the channel, then post the final answer below it.
+Same async flow — immediate acknowledgement, then answer.
 
-### 2. Use slash commands:
+### Multi-turn conversation
 ```
-/moogle How do I beat Emerald Weapon?
-```
-The bot will immediately post a "thinking" message in the channel, then post the final answer below it.
-
-### 3. Continue a conversation (multi-turn):
-Reply in a thread or send another top-level @mention within 30 minutes:
-```
-@GoogleMoogle who is Cloud Strife?
+@GoogleMoogle Who is Shantotto?
 ... (bot replies) ...
-@GoogleMoogle what about Tifa?   ← bot remembers the Cloud context
+@GoogleMoogle What job is she?    ← bot remembers the prior context
 ```
-Conversations are scoped per user per channel. A 30-minute idle period starts a fresh context.
+Context is per-user per-channel, scoped to a 10-minute idle window. Start a new conversation by waiting 10 minutes or using `/moogle reset`.
 
-### 4. Reset conversation memory:
+### Reset conversation memory
 ```
 /moogle reset
-```
-The bot will immediately clear its memory of the current conversation and confirm with a message.
-
-The bot responds with Moogle personality:
-- "Kupo! Cloud Strife is the main protagonist of Final Fantasy VII..."
-- "Kupo kupo! To beat Emerald Weapon, you'll need..."
-
-### Error Handling
-
-If something goes wrong during processing, the bot will post a friendly error message:
-```
-Kupo... I ran into an issue with the Moogle Magic! 
-
-The crystal ball is a bit cloudy right now. Please try asking your question again in a moment, kupo!
 ```
 
 ## Project Structure
 
 ```
 .
-├── build.sh                          # Build script for Lambda packages
-├── ffxi_item_lookup.py               # Standalone CLI version of the wiki scraper
+├── build.sh                              # Builds all Lambda zips + layer
+├── env.sh                                # (gitignored) TF_VAR_* secrets
 ├── lambda_functions/
-│   ├── authorizer.py                 # API key validator
-│   ├── initial_lambda.py             # Parse request, post thinking message, enqueue to SQS
-│   ├── processing/                   # Processing Lambda package
-│   │   ├── handler.py                # Lambda orchestration (thin layer)
-│   │   ├── llm_client.py             # Claude on Bedrock + tool-use loop
-│   │   ├── ffxi_item_lookup.py       # FFXIclopedia scraper (Claude tool implementation)
-│   │   ├── slack_client.py           # Slack Web API wrapper
-│   │   └── utils.py                  # Shared helpers
-│   ├── requirements.txt              # Python dependencies
-│   └── *.zip                         # Built Lambda packages
+│   ├── authorizer.py                     # API key validator (Lambda Authorizer)
+│   ├── initial_lambda.py                 # Slack request parsing, thinking msg, SQS enqueue
+│   ├── throttle/
+│   │   └── throttle.py                   # Sets reserved concurrency=0 (circuit breaker)
+│   ├── processing/
+│   │   ├── handler.py                    # Lambda entry point + orchestration
+│   │   ├── llm_client.py                 # Bedrock Converse API + tool-use loop
+│   │   ├── ffxi_item_lookup.py           # FFXIclopedia scraper (item tool)
+│   │   ├── ffxi_wiki_search.py           # BG-Wiki search + FFXIclopedia fallback (wiki tool)
+│   │   ├── memory_client.py              # AgentCore Memory (multi-turn state)
+│   │   ├── slack_client.py               # Slack Web API wrapper
+│   │   └── utils.py                      # Shared helpers
+│   └── requirements.txt                  # boto3, requests, beautifulsoup4
 └── terraform/
-    ├── main.tf                       # All AWS resources
-    └── variables.tf                  # Terraform variables
+    ├── main.tf                           # All AWS resources
+    └── variables.tf                      # Configurable variables
 ```
 
 ## API Gateway Endpoints
-
-After deployment, the following endpoints are available under `/googlemoogle`:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/googlemoogle/events` | POST | Slack Events API (@mentions) |
 | `/googlemoogle/slash` | POST | Slack Slash Commands |
-| `/googlemoogle/health` | GET | Health check endpoint (tests API Gateway + Authorizer) |
+| `/googlemoogle/health` | GET | Health check — MOCK integration, no Lambda invoked |
 
-All endpoints require the `api_key` query parameter (e.g., `?api_key=YOUR_KEY`).
-
-## Customization
-
-### Change Idempotency Window
-Edit the S3 lifecycle configuration in `terraform/main.tf` (default: 1 day)
-
-### Modify Moogle Personality
-Edit `DEFAULT_PERSONALITY` in `lambda_functions/processing/llm_client.py`
-
-### Change Claude Model on Bedrock
-Set `TF_VAR_bedrock_model_id` (or the `bedrock_model_id` Terraform variable)
-to another Anthropic model ID supported by Bedrock — e.g.
-`anthropic.claude-sonnet-4-6`. Default is Claude Haiku 4.5
-(`anthropic.claude-haiku-4-5-20251001-v1:0`).
-
-### Tune Tool Use
-The `ffxi_item_lookup` tool definition lives in
-`lambda_functions/processing/llm_client.py` (`FFXI_ITEM_LOOKUP_TOOL`). Adjust
-the description to tighten/loosen when Claude decides to call it. The lookup
-itself, including the response trimming (`max_vendors`, `max_drops`), is in
-`lambda_functions/processing/ffxi_item_lookup.py`.
-
-### Change Error Message
-Edit `ERROR_MESSAGE` in `lambda_functions/processing/slack_client.py`
+All endpoints require `?api_key=YOUR_KEY`.
 
 ## Monitoring
 
-View logs in CloudWatch:
-- `/aws/lambda/ff-moogle-bot-initial-lambda`
-- `/aws/lambda/ff-moogle-bot-processing-lambda`
+CloudWatch log groups:
+- `/aws/lambda/ff-moogle-bot-initial`
+- `/aws/lambda/ff-moogle-bot-processing`
 - `/aws/lambda/ff-moogle-bot-authorizer`
+- `/aws/lambda/ff-moogle-bot-runaway-throttle`
 
-Check SQS metrics for queue depth and processing times.
+AWS Chatbot sends alarm notifications to the configured Slack channel (`#code-testing` by default) when:
+- The runaway alarm fires (≥ 30 invocations/min)
+- Monthly spend reaches 85% or 100% of budget (forecasted or actual)
+
+## Customization
+
+### Change the LLM model
+Set `TF_VAR_bedrock_model_id` before running `terraform apply`. Must be a cross-region inference profile ID for Anthropic models, e.g. `us.anthropic.claude-sonnet-4-6`. Default: `us.anthropic.claude-haiku-4-5-20251001-v1:0`.
+
+### Modify Moogle personality
+Edit `DEFAULT_PERSONALITY` in `lambda_functions/processing/llm_client.py`.
+
+### Tune tool-use behavior
+Tool descriptions live in `llm_client.py` (`FFXI_ITEM_LOOKUP_TOOL`, `FFXI_WIKI_SEARCH_TOOL`). Adjust the descriptions to tighten or loosen when Claude decides to call each tool.
+
+### Adjust the runaway threshold
+Set `TF_VAR_runaway_alarm_threshold` (default: 30 invocations/minute).
+
+### Change the conversation idle window
+Set `SESSION_IDLE_MINUTES` in the Lambda environment variables in `terraform/main.tf` (default: 10).
+
+## Health Check
+
+Test API Gateway and the Authorizer without invoking any processing Lambda:
+
+```bash
+curl "$(terraform -chdir=terraform output -raw api_gateway_health_url)?api_key=$(terraform -chdir=terraform output -raw api_key_value)"
+```
+
+Expected response:
+```json
+{"message": "hello world", "status": "ok"}
+```
+
+## Troubleshooting
+
+**Bot not responding / 500 errors**
+- Check CloudWatch logs: `/aws/lambda/ff-moogle-bot-initial` and `ff-moogle-bot-processing`
+- Verify Slack signing secret and bot token are correct (`terraform show`)
+- Confirm the `?api_key=` query parameter is present in the Slack app URL configuration
+
+**"Unauthorized" / 403**
+- API key mismatch — compare `?api_key=` value against `terraform output api_key_value`
+
+**Duplicate responses**
+- Check S3 idempotency bucket for stale markers
+- Verify S3 lifecycle rules are in place (1-day expiry)
+
+**Bedrock errors**
+- `AccessDeniedException`: Enable Claude Haiku 4.5 in AWS Console > Bedrock > Model access. Use the cross-region profile ID (`us.anthropic.claude-haiku-4-5-20251001-v1:0`), not the bare model ID.
+- `ValidationException` on model ID: Anthropic models require the `us.` cross-region inference profile prefix — the bare model ID is not accepted.
+- Tool errors: `ffxi_item_lookup` and `ffxi_wiki_search` hit external sites; transient failures appear in logs as `Tool error:` entries.
+
+**Circuit breaker fired (bot returns 429)**
+- Check `#code-testing` in Slack for the alarm notification
+- Re-enable the bot after investigating:
+  ```bash
+  aws lambda delete-function-concurrency --function-name ff-moogle-bot-initial --region us-east-1
+  ```
+
+**Wiki search returning nothing**
+- BG-Wiki is tried first, FFXIclopedia second. If both return no content the LLM answers from its training data.
+- Temporarily set `TF_VAR_log_level=DEBUG` and redeploy to see search queries and results in CloudWatch.
 
 ## Cleanup
 
@@ -227,100 +255,16 @@ cd terraform
 terraform destroy
 ```
 
-This will remove all AWS resources but won't delete the S3 bucket if it has objects. You may need to manually empty and delete the idempotency bucket.
+The idempotency S3 bucket may need to be manually emptied first if it contains objects.
 
 ## Security Notes
 
-- Secrets are passed as environment variables to Lambdas
-- S3 idempotency bucket has lifecycle rules to auto-delete old markers (1 day)
-- Slack signatures are validated before processing
-- API Gateway API key required as query parameter for POST requests (since Slack can't send custom headers)
-- No sensitive data is logged
-
-## Testing
-
-### Health Check Endpoint
-
-A simple GET endpoint is available for testing the API Gateway and Authorizer using **API Gateway MOCK integration** (no Lambda invoked):
-
-```bash
-# Get the health endpoint URL
-curl "$(terraform output -raw api_gateway_health_url)?api_key=$(terraform output -raw api_key_value)"
-
-# Or manually
-curl "https://xxx.execute-api.us-east-1.amazonaws.com/prod/googlemoogle/health?api_key=YOUR_KEY"
-```
-
-**Expected response:**
-```json
-{"message": "hello world", "status": "ok"}
-```
-
-This uses API Gateway's MOCK integration to return a static response. It tests **only** the API Gateway + Authorizer layer without invoking any Lambda. Use this to verify your API key and basic connectivity before testing Slack integration.
-
-### Testing Tools
-
-See the `tools/` directory for a comprehensive test script:
-
-```bash
-cd tools
-./test_api.sh <api_gateway_url> <api_key> health
-```
-
-## Troubleshooting
-
-**500 Internal Server Error:**
-- Check CloudWatch logs: `/aws/lambda/ff-moogle-bot-*`
-- Verify Lambda environment variables are set: `terraform show`
-- Check for Python syntax errors in deployed code
-
-**Bot not responding:**
-- Check CloudWatch logs for errors
-- Verify Slack signing secret matches
-- Ensure API Gateway URL is correctly configured in Slack
-- **Verify the `api_key` query parameter is included in the URL** (e.g., `?api_key=your-key`)
-
-**"Unauthorized" or "Forbidden" errors:**
-- Check that the API key query parameter matches the value from `terraform output api_key_value`
-- Verify the URL includes `?api_key=YOUR_KEY` at the end
-
-**Duplicate responses:**
-- Check S3 idempotency bucket for request markers
-- Verify S3 lifecycle rules are configured
-
-**Bedrock errors:**
-- `AccessDeniedException` on `bedrock:InvokeModel`: enable the chosen Claude model in AWS Console > Bedrock > Model access, in the deployment region
-- `ValidationException` about model ID: verify `BEDROCK_MODEL_ID` env var on the Processing Lambda matches an active Anthropic model
-- Throttling: Bedrock has per-account/region quotas; check CloudWatch and request a quota increase if needed
-- Tool loop errors: check Processing Lambda logs for `Tool call:` / `Tool error:` entries; ffxi_item_lookup hits ffxiclopedia.fandom.com — transient network failures appear as tool errors
-
-**API Gateway / Authorizer not working:**
-- Authorizer Lambda not invoked (no CloudWatch logs): API Gateway deployment may be stale
-  - The deployment has automatic triggers to redeploy when resources change
-  - If needed, run `terraform apply` again to trigger a new deployment
-- Getting 403 errors: Check API key query parameter is included: `?api_key=YOUR_KEY`
-- Methods returning 500 without hitting authorizer: Check deployment succeeded and stage is active
-- **"API Gateway does not have permission to assume the provided role"**:
-  - The API Gateway authorizer needs a separate IAM role that API Gateway can assume
-  - This role must have a trust policy allowing `apigateway.amazonaws.com`
-  - The role needs `lambda:InvokeFunction` permission on the authorizer Lambda
-  - See `aws_iam_role.api_gateway_authorizer_role` in main.tf
-- **"Active stages pointing to this deployment" error**:
-  - Don't use `terraform taint` on API Gateway deployments
-  - The deployment uses `create_before_destroy` lifecycle to handle updates
-  - The stage ignores deployment_id changes to prevent destruction
-  - Just run `terraform apply` normally
-
-**Lambda Permission Errors:**
-- Check `aws_lambda_permission` resources are created before authorizer
-- Verify authorizer credentials IAM role has correct trust policy (apigateway.amazonaws.com)
-- CloudWatch logs for authorizer: `/aws/lambda/ff-moogle-bot-authorizer`
-
-**Slash commands not working:**
-- Ensure the `/slash` endpoint URL is configured in the Slack app
-- Verify the bot token has `chat:write` scope
-- Check CloudWatch logs for Initial Lambda to see if requests are being received
+- Slack secrets are passed as Lambda environment variables (not logged)
+- S3 idempotency bucket is private with a 1-day object lifecycle
+- HMAC Slack signature validated on every request before any processing
+- API key required as `?api_key=` query parameter (Slack cannot send custom headers)
+- Circuit breakers limit runaway spend automatically
 
 ## License
 
-MIT License - feel free to modify and use for your own projects, kupo!
+MIT License — feel free to modify and use for your own projects, kupo!
