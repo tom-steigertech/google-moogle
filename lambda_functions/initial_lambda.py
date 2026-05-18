@@ -154,14 +154,16 @@ def handler(event, context):
     # If the thread session has no memory, fall back to the user's main-channel
     # session — this handles the common case of @mention in the channel followed
     # by a thread reply to the bot's response (different thread_ts, same conversation).
-    elif thread_ts and not _session_has_memory(actor_id, session_id):
-        if session_id != user_session_id and _session_has_memory(actor_id, user_session_id):
-            logger.info(f"Thread resolved to user session {user_session_id!r}")
-            session_id = user_session_id
-        elif is_thread_reply:
-            # No memory in thread session or user session — unrelated thread, ignore.
-            logger.info(f"Thread reply ignored — no prior session in {session_id!r}")
-            return {'statusCode': 200, 'body': json.dumps({'ok': True})}
+    # Always process thread replies regardless of memory state — silently dropping
+    # them when memory is unavailable (e.g. transient API failure) is worse than
+    # occasionally responding in an unrelated thread.
+    elif thread_ts:
+        if not _session_has_memory(actor_id, session_id):
+            if session_id != user_session_id and _session_has_memory(actor_id, user_session_id):
+                logger.info(f"Thread resolved to user session {user_session_id!r}")
+                session_id = user_session_id
+            else:
+                logger.info(f"No prior session for thread; starting fresh in {session_id!r}")
 
     # Drop anything that isn't a recognised command type — prevents message.channels
     # events that slipped through the earlier filters from reaching SQS.
