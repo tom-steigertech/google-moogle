@@ -179,9 +179,10 @@ def handler(event, context):
         logger.info("Unactionable event — skipping SQS enqueue")
         return {'statusCode': 200, 'body': json.dumps({'ok': True})}
 
-    # Easter egg: n0gr1p gets a special greeting
-    if slack_user_id == 'U1HUN2YUR':
-        logger.info("Easter egg triggered for n0gr1p")
+    # Easter egg: configurable user gets a special greeting instead of a real answer
+    easter_egg_user_id = os.environ.get('EASTER_EGG_USER_ID', '')
+    if easter_egg_user_id and slack_user_id == easter_egg_user_id:
+        logger.info(f"Easter egg triggered for user {slack_user_id}")
         post_slack_message(channel_id, "What n00b? I couldn't hear you... please show yourself out!", thread_ts)
         return {'statusCode': 200, 'body': json.dumps({'ok': True})}
 

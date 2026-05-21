@@ -81,3 +81,9 @@ variable "log_level" {
     error_message = "LOG_LEVEL must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL."
   }
 }
+
+variable "easter_egg_user_id" {
+  description = "Slack user ID that receives the easter egg reply instead of a normal response. Leave empty to disable."
+  type        = string
+  default     = ""
+}

@@ -315,6 +315,7 @@ resource "aws_lambda_function" "initial" {
       AGENTCORE_MEMORY_ID   = aws_bedrockagentcore_memory.moogle.id
       SESSION_IDLE_MINUTES  = "10"
       S3_BUCKET_IDEMPOTENCY = aws_s3_bucket.idempotency.bucket
+      EASTER_EGG_USER_ID    = var.easter_egg_user_id
     }
   }
 
