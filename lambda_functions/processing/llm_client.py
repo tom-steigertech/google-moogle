@@ -223,9 +223,7 @@ You have four tools — always prefer them over answering from memory:
 
 4. save_note: Call ONLY when the user is explicitly contributing a fact for you to remember ("remember that…", "take note…", "save this…"). Do NOT call for ordinary questions. After saving, acknowledge in 1-2 sentences of Moogle voice.
 
-5. ffxi_zone_map: Fetch the zone map image(s) from BG-Wiki when the user asks about zone layout, navigation within a zone, zone line locations, or how to move between areas. Interpret the map image visually and describe the layout in plain text.
-
-**Critical rule for multi-map zones:** When a zone has multiple sub-maps (Map 1, Map 2, etc.), they are all part of the SAME zone. Numbered markers (①②③) on the maps indicate transitions BETWEEN sub-maps of that zone — they are NOT exits to other zones. A ① on Map 1 leads to the ① entrance on Map 2, and so on. Never tell a user to go to a different zone when the question is about navigating between sub-maps.
+5. ffxi_zone_map: Fetch the zone map image(s) and BG-Wiki page text when the user asks about zone layout, navigation within a zone, or how to move between areas or sub-maps. The tool returns both the page text and the map images — read both carefully. Answer ONLY from what the page text and maps show; never blend in knowledge about surrounding zones. For multi-map zones, the sub-maps are all part of the same zone — transitions between them appear as passages or exits on the map images, not as zone lines to other zones.
 
 Some recent notes may already appear below; use search_notes to dig deeper into the full pool by keyword.
 
@@ -458,7 +456,17 @@ Remember: Stay in character as a Moogle!"""
             maps = result["maps"]
             total = len(maps)
             blocks = []
-            # Preamble — critical context about multi-map zones
+
+            # Lead with the zone page text — this grounds the model in what the
+            # zone actually contains and prevents hallucination from training data.
+            zone_text = result.get("zone_text", "")
+            if zone_text:
+                blocks.append({"text": (
+                    f"=== BG-Wiki page text for {result['zone_name']} ===\n{zone_text}\n"
+                    "=== End of page text ==="
+                )})
+
+            # Preamble for multi-map zones
             if total > 1:
                 map_labels = ", ".join(
                     f"Map {m['map_number']}" if m["map_number"] else m["label"]
@@ -466,16 +474,14 @@ Remember: Stay in character as a Moogle!"""
                 )
                 blocks.append({"text": (
                     f"{result['zone_name']} has {total} sub-maps ({map_labels}). "
-                    "These are all different sections of the SAME zone — they are NOT "
-                    "separate zones. "
-                    "Transitions between sub-maps are marked with NUMBERED ICONS "
-                    "(e.g. ①②③ or [1][2][3]) that appear on both maps at matching "
-                    "positions. A ① on Map 1 connects to the ① on Map 2, etc. "
-                    "These in-zone map transitions are COMPLETELY DIFFERENT from "
-                    "zone exits (which lead to other named zones). "
-                    "Each map image is labeled below."
+                    "These are all sections of the SAME zone, not separate zones. "
+                    "Transitions between sub-maps happen at specific passages, "
+                    "doorways, staircases, or labeled exit points visible on the maps. "
+                    "Only use what you can actually see on the maps and in the page "
+                    "text above — do NOT use prior knowledge about surrounding zones."
                 )})
-            # Interleave a text label before each image so the model knows which is which
+
+            # Interleave a text label before each image
             for m in maps:
                 map_label = f"Map {m['map_number']}" if m["map_number"] else m["label"]
                 blocks.append({"text": f"--- {result['zone_name']}: {map_label} ---"})
@@ -485,10 +491,11 @@ Remember: Stay in character as a Moogle!"""
                         "source": {"bytes": m["bytes"]},
                     }
                 })
+
             blocks.append({"text": (
-                "Using the map image(s) above, describe the layout and answer the "
-                "navigation question. For within-zone map transitions, cite the "
-                "numbered marker and which maps it connects."
+                "Answer the navigation question using ONLY the map images and page "
+                "text provided above. Do not reference zones or areas not mentioned "
+                "in the page text or visible in the maps."
             )})
             return blocks
         raise ValueError(f"Unknown tool: {name}")
