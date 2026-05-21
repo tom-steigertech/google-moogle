@@ -1,13 +1,14 @@
 """FFXI zone map fetcher — retrieves map images from BG-Wiki via MediaWiki API."""
 
 import logging
+import re
 
 import requests
 
 logger = logging.getLogger(__name__)
 
 BG_WIKI_API = "https://www.bg-wiki.com/api.php"
-MAX_MAPS = 3  # max map images to return (covers multi-floor / multi-area zones)
+MAX_MAPS = 4  # max map images to return (covers multi-floor / multi-area zones)
 
 
 def _session() -> requests.Session:
@@ -75,6 +76,13 @@ def _fmt(url: str) -> str:
     return "jpeg"
 
 
+def _map_number(filename: str) -> int:
+    """Extract trailing map number from a filename stem, e.g. 'Map_zone_2' → 2.
+    Returns 0 if no number is found (sorts unnumbered maps first)."""
+    m = re.search(r'[_-](\d+)$', filename)
+    return int(m.group(1)) if m else 0
+
+
 def fetch_zone_maps(zone_name: str) -> dict:
     """Fetch zone map image(s) from BG-Wiki for the given zone name.
 
@@ -82,7 +90,7 @@ def fetch_zone_maps(zone_name: str) -> dict:
         {
             "found": bool,
             "zone_name": str,
-            "maps": [{"bytes": bytes, "format": str, "label": str}],
+            "maps": [{"bytes": bytes, "format": str, "label": str, "map_number": int}],
             "error": str,   # only when found is False
         }
     """
@@ -97,17 +105,26 @@ def fetch_zone_maps(zone_name: str) -> dict:
                 "error": f"No map images found for '{zone_name}' on BG-Wiki.",
             }
 
+        # Sort titles by extracted map number so Map 1 always comes before Map 2
+        titles_sorted = sorted(
+            titles[:MAX_MAPS],
+            key=lambda t: _map_number(t.replace("File:", "").rsplit(".", 1)[0])
+        )
+
         maps = []
-        for title in titles[:MAX_MAPS]:
+        for title in titles_sorted:
             url = _image_url(title, sess)
             if not url:
                 continue
             img_resp = sess.get(url, timeout=15)
             img_resp.raise_for_status()
+            stem = title.replace("File:", "").rsplit(".", 1)[0]
+            num = _map_number(stem)
             maps.append({
                 "bytes": img_resp.content,
                 "format": _fmt(url),
-                "label": title.replace("File:", "").rsplit(".", 1)[0],
+                "label": stem,
+                "map_number": num,
             })
 
         if not maps:

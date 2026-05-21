@@ -223,7 +223,9 @@ You have four tools — always prefer them over answering from memory:
 
 4. save_note: Call ONLY when the user is explicitly contributing a fact for you to remember ("remember that…", "take note…", "save this…"). Do NOT call for ordinary questions. After saving, acknowledge in 1-2 sentences of Moogle voice.
 
-5. ffxi_zone_map: Fetch the zone map image(s) from BG-Wiki when the user asks about zone layout, navigation within a zone, zone line locations, or how to move between areas. Interpret the map image visually to answer the question — describe what you see (landmarks, zone lines, paths) in plain text so the user doesn't need to see the image themselves.
+5. ffxi_zone_map: Fetch the zone map image(s) from BG-Wiki when the user asks about zone layout, navigation within a zone, zone line locations, or how to move between areas. Interpret the map image visually and describe the layout in plain text.
+
+**Critical rule for multi-map zones:** When a zone has multiple sub-maps (Map 1, Map 2, etc.), they are all part of the SAME zone. Numbered markers (①②③) on the maps indicate transitions BETWEEN sub-maps of that zone — they are NOT exits to other zones. A ① on Map 1 leads to the ① entrance on Map 2, and so on. Never tell a user to go to a different zone when the question is about navigating between sub-maps.
 
 Some recent notes may already appear below; use search_notes to dig deeper into the full pool by keyword.
 
@@ -453,21 +455,41 @@ Remember: Stay in character as a Moogle!"""
             result = fetch_zone_maps(zone_name)
             if not result["found"]:
                 return [{"text": result.get("error", f"No maps found for '{zone_name}'")}]
+            maps = result["maps"]
+            total = len(maps)
             blocks = []
-            for m in result["maps"]:
+            # Preamble — critical context about multi-map zones
+            if total > 1:
+                map_labels = ", ".join(
+                    f"Map {m['map_number']}" if m["map_number"] else m["label"]
+                    for m in maps
+                )
+                blocks.append({"text": (
+                    f"{result['zone_name']} has {total} sub-maps ({map_labels}). "
+                    "These are all different sections of the SAME zone — they are NOT "
+                    "separate zones. "
+                    "Transitions between sub-maps are marked with NUMBERED ICONS "
+                    "(e.g. ①②③ or [1][2][3]) that appear on both maps at matching "
+                    "positions. A ① on Map 1 connects to the ① on Map 2, etc. "
+                    "These in-zone map transitions are COMPLETELY DIFFERENT from "
+                    "zone exits (which lead to other named zones). "
+                    "Each map image is labeled below."
+                )})
+            # Interleave a text label before each image so the model knows which is which
+            for m in maps:
+                map_label = f"Map {m['map_number']}" if m["map_number"] else m["label"]
+                blocks.append({"text": f"--- {result['zone_name']}: {map_label} ---"})
                 blocks.append({
                     "image": {
                         "format": m["format"],
                         "source": {"bytes": m["bytes"]},
                     }
                 })
-            blocks.append({
-                "text": (
-                    f"Zone map(s) for {result['zone_name']} ({len(result['maps'])} image(s)). "
-                    "Interpret the map visually and describe the layout, zone lines, and "
-                    "navigation paths in your answer."
-                )
-            })
+            blocks.append({"text": (
+                "Using the map image(s) above, describe the layout and answer the "
+                "navigation question. For within-zone map transitions, cite the "
+                "numbered marker and which maps it connects."
+            )})
             return blocks
         raise ValueError(f"Unknown tool: {name}")
 
