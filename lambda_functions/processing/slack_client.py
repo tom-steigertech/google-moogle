@@ -1,6 +1,7 @@
 """Slack Client for the Moogle bot - handles Slack API interactions."""
 
 import os
+import re
 import logging
 import requests
 
@@ -52,66 +53,74 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
             ))
             self.logger.addHandler(handler)
     
+    @staticmethod
+    def _md_to_mrkdwn(text: str) -> str:
+        """Convert common Markdown syntax to Slack mrkdwn syntax."""
+        # Bold: **text** → *text*
+        text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text, flags=re.DOTALL)
+        # Markdown headers: ## Header → *Header*
+        text = re.sub(r'^#{1,3}\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
+        # Unordered list items at line start: "- item" or "* item" → "• item"
+        text = re.sub(r'^[*-] ', '• ', text, flags=re.MULTILINE)
+        return text
+
+    @staticmethod
+    def _md_to_blocks(text: str) -> list:
+        """Convert a Markdown-formatted LLM response into Slack Block Kit blocks.
+
+        Splits on blank lines, detects section headers (a single bold line),
+        and inserts dividers between sections for a clean visual layout.
+        """
+        text = MoogleSlackClient._md_to_mrkdwn(text.strip())
+        paragraphs = re.split(r'\n{2,}', text)
+        blocks = []
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+            first_line = para.split('\n')[0]
+            # A section header is a line that is entirely bold (starts and ends with *)
+            is_header = bool(re.match(r'^\*[^*\n]+\*:?\s*$', first_line))
+            if is_header and blocks:
+                blocks.append({"type": "divider"})
+            # Slack section blocks cap at 3000 chars
+            if len(para) > 2900:
+                para = para[:2897] + "…"
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": para}
+            })
+        return blocks or [{
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": text or "(no response)"}
+        }]
+
     def send_response(self, channel_id: str, text: str, thread_ts: str = None,
                      is_mention: bool = False, timeout: int = 30) -> dict:
-        """Send a message to Slack.
-        
-        Args:
-            channel_id: The Slack channel ID
-            text: The message text to send
-            thread_ts: Thread timestamp (for replies in threads)
-            is_mention: Whether this is a mention response (to determine threading)
-            timeout: Request timeout in seconds
-            
-        Returns:
-            The Slack API response as a dict
-            
-        Raises:
-            Exception: If the Slack API call fails
+        """Send a formatted message to Slack as Block Kit blocks.
+
+        Converts Markdown in `text` to Slack mrkdwn and splits it into
+        section blocks with dividers between named sections.
         """
         if not channel_id:
             raise ValueError("channel_id is required")
-        
+
         if not text:
             self.logger.warning("Empty text provided, using error message")
             text = self.ERROR_MESSAGE
-        
-        data = {
-            'channel': channel_id,
-            'text': text
-        }
-        
-        if thread_ts:
-            data['thread_ts'] = thread_ts
-        
-        self.logger.debug(f"Sending message to channel {channel_id}")
-        if thread_ts:
-            self.logger.debug(f"In thread: {thread_ts}")
-        
-        try:
-            resp = requests.post(
-                self.api_url,
-                headers=self.headers,
-                json=data,
-                timeout=timeout
-            )
-            resp.raise_for_status()
-            response_data = resp.json()
-            
-            if response_data.get('ok'):
-                self.logger.info("Successfully sent message to Slack")
-                return response_data
-            else:
-                error = response_data.get('error', 'Unknown error')
-                self.logger.error(f"Slack API error: {error}")
-                raise Exception(f"Slack API error: {error}")
-                
-        except requests.exceptions.Timeout:
-            self.logger.error(f"Timeout sending message to Slack after {timeout}s")
-            raise Exception(f"Slack API timeout after {timeout}s")
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error sending message to Slack: {e}")
-            raise
+
+        blocks = self._md_to_blocks(text)
+        # Fallback text for notifications / accessibility (first 150 chars, plain)
+        fallback = re.sub(r'[*_~`]', '', text)[:150]
+
+        return self.send_blocks(
+            channel_id=channel_id,
+            blocks=blocks,
+            text=fallback,
+            thread_ts=thread_ts,
+            is_mention=is_mention,
+            timeout=timeout,
+        )
     
     def send_blocks(self, channel_id: str, blocks: list, text: str = "",
                     thread_ts: str = None, is_mention: bool = False,
