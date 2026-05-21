@@ -23,7 +23,8 @@ terraform {
 
 locals {
   common_tags = {
-    appname = "slackbotGoogleMoogle"
+    appname    = "slackbotGoogleMoogle"
+    aws-apn-id = "pc:9spfrcxqecofxzcgzjjzsf3o3"
   }
 }
 
