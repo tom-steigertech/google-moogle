@@ -14,6 +14,7 @@ import boto3
 
 from .ffxi_item_lookup import lookup_as_tool_result
 from .ffxi_wiki_search import search_as_tool_result as wiki_search
+from .ffxi_zone_map import fetch_zone_maps
 from .notes_client import (
     save_note as save_note_to_s3,
     search_notes as search_notes_in_s3,
@@ -122,6 +123,37 @@ SEARCH_NOTES_TOOL = {
     }
 }
 
+FFXI_ZONE_MAP_TOOL = {
+    "toolSpec": {
+        "name": "ffxi_zone_map",
+        "description": (
+            "Fetch the map image(s) for a Final Fantasy XI zone from BG-Wiki. "
+            "Use this when the user asks about zone layout, how to navigate within "
+            "a zone, where zone lines are located, how to move between different "
+            "areas or sub-maps of the same zone, or any question that requires "
+            "understanding the physical layout of a zone. Returns the actual map "
+            "image(s) which you can interpret visually to answer the question. "
+            "For multi-level or multi-area zones, multiple maps may be returned."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "zone_name": {
+                        "type": "string",
+                        "description": (
+                            "The exact name of the FFXI zone as it appears on "
+                            "BG-Wiki, e.g. 'Jugner Forest', 'Qufim Island', "
+                            "'Windurst Waters', 'Promyvion - Holla'."
+                        ),
+                    }
+                },
+                "required": ["zone_name"],
+            }
+        },
+    }
+}
+
 SAVE_NOTE_TOOL = {
     "toolSpec": {
         "name": "save_note",
@@ -190,6 +222,8 @@ You have four tools — always prefer them over answering from memory:
 3. search_notes: Search the shared pool of user-contributed FFXI knowledge. Call this for FFXI questions where community wisdom might apply, and ALWAYS consider calling it after ffxi_wiki_search to find player notes that expand on or contradict the wiki. If matches come back, weave them into your answer and credit "another adventurer's notes." If no matches, just use the wiki/your knowledge — don't apologise for an empty search.
 
 4. save_note: Call ONLY when the user is explicitly contributing a fact for you to remember ("remember that…", "take note…", "save this…"). Do NOT call for ordinary questions. After saving, acknowledge in 1-2 sentences of Moogle voice.
+
+5. ffxi_zone_map: Fetch the zone map image(s) from BG-Wiki when the user asks about zone layout, navigation within a zone, zone line locations, or how to move between areas. Interpret the map image visually to answer the question — describe what you see (landmarks, zone lines, paths) in plain text so the user doesn't need to see the image themselves.
 
 Some recent notes may already appear below; use search_notes to dig deeper into the full pool by keyword.
 
@@ -308,6 +342,7 @@ Remember: Stay in character as a Moogle!"""
                 FFXI_WIKI_SEARCH_TOOL,
                 SEARCH_NOTES_TOOL,
                 SAVE_NOTE_TOOL,
+                FFXI_ZONE_MAP_TOOL,
             ]
         }
         if force_tool:
@@ -342,12 +377,18 @@ Remember: Stay in character as a Moogle!"""
             self.logger.info(f"Tool call: {tool_name} input={tool_input}")
             try:
                 output = self._dispatch_tool(tool_name, tool_input)
-                if tool_name == "ffxi_item_lookup":
-                    captured_items.append(output)
+                # Image-returning tools (e.g. ffxi_zone_map) return a pre-built
+                # list of content blocks; all other tools return a plain dict.
+                if isinstance(output, list):
+                    content_blocks = output
+                else:
+                    if tool_name == "ffxi_item_lookup":
+                        captured_items.append(output)
+                    content_blocks = [{"json": output}]
                 results.append({
                     "toolResult": {
                         "toolUseId": tool_use_id,
-                        "content": [{"json": output}],
+                        "content": content_blocks,
                     }
                 })
             except Exception as e:
@@ -405,6 +446,29 @@ Remember: Stay in character as a Moogle!"""
             except Exception as e:
                 self.logger.error(f"save_note failed: {e}", exc_info=True)
                 return {"saved": False, "error": str(e)}
+        if name == "ffxi_zone_map":
+            zone_name = (tool_input or {}).get("zone_name", "").strip()
+            if not zone_name:
+                return [{"text": "zone_name is required"}]
+            result = fetch_zone_maps(zone_name)
+            if not result["found"]:
+                return [{"text": result.get("error", f"No maps found for '{zone_name}'")}]
+            blocks = []
+            for m in result["maps"]:
+                blocks.append({
+                    "image": {
+                        "format": m["format"],
+                        "source": {"bytes": m["bytes"]},
+                    }
+                })
+            blocks.append({
+                "text": (
+                    f"Zone map(s) for {result['zone_name']} ({len(result['maps'])} image(s)). "
+                    "Interpret the map visually and describe the layout, zone lines, and "
+                    "navigation paths in your answer."
+                )
+            })
+            return blocks
         raise ValueError(f"Unknown tool: {name}")
 
     def set_personality(self, prompt: str):
