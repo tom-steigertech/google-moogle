@@ -179,6 +179,12 @@ def handler(event, context):
         logger.info("Unactionable event — skipping SQS enqueue")
         return {'statusCode': 200, 'body': json.dumps({'ok': True})}
 
+    # Easter egg: n0gr1p gets a special greeting
+    if slack_user_id == 'U1HUN2YUR':
+        logger.info("Easter egg triggered for n0gr1p")
+        post_slack_message(channel_id, "What n00b? I couldn't hear you... please show yourself out!", thread_ts)
+        return {'statusCode': 200, 'body': json.dumps({'ok': True})}
+
     # Handle /moogle reset — clear session and return early (no SQS enqueue)
     if is_slash_command and payload.get('text', '').strip().lower() == 'reset':
         logger.info(f"Reset requested for session {session_id!r}")
