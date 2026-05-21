@@ -12,6 +12,7 @@ import boto3
 
 from .llm_client import MoogleLLMClient
 from .memory_client import load_recent_turns, save_turn
+from .notes_client import recent_notes
 from .slack_client import MoogleSlackClient
 from .utils import setup_logging, extract_question, truncate_text, get_env_var
 
@@ -131,9 +132,26 @@ def handler(event, context):
                 logger.info(f"Loaded {len(prior_turns)} prior turn(s) from session {session_id!r}")
             messages = prior_turns + [{"role": "user", "content": question}]
 
+            # Load user-contributed notes for context (best-effort).
+            try:
+                notes_for_context = recent_notes(S3_BUCKET, limit=50)
+                if notes_for_context:
+                    logger.info(f"Loaded {len(notes_for_context)} note(s) for context")
+            except Exception as notes_err:
+                logger.error(f"Failed to load notes: {notes_err}")
+                notes_for_context = []
+
             # Generate response via LLM (Claude on Bedrock + tool use)
             logger.info("Calling Bedrock Converse API")
-            answer, item_lookups = llm_client.generate_response(messages)
+            answer, item_lookups = llm_client.generate_response(
+                messages,
+                notes=notes_for_context,
+                note_context={
+                    "bucket": S3_BUCKET,
+                    "author_id": actor_id,
+                    "channel_id": channel_id,
+                },
+            )
             logger.info(f"Bedrock response received, length: {len(answer)}, item_lookups: {len(item_lookups)}")
 
             # Post item data cards first (found items only; LLM handles not-found).

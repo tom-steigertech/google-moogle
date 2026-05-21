@@ -14,6 +14,11 @@ import boto3
 
 from .ffxi_item_lookup import lookup_as_tool_result
 from .ffxi_wiki_search import search_as_tool_result as wiki_search
+from .notes_client import (
+    save_note as save_note_to_s3,
+    search_notes as search_notes_in_s3,
+    format_notes_for_prompt as _format_notes_for_prompt,
+)
 
 
 DEFAULT_MODEL_ID = "amazon.nova-lite-v1:0"
@@ -83,6 +88,74 @@ FFXI_WIKI_SEARCH_TOOL = {
     }
 }
 
+SEARCH_NOTES_TOOL = {
+    "toolSpec": {
+        "name": "search_notes",
+        "description": (
+            "Search the shared pool of user-contributed FFXI notes for entries "
+            "relevant to a topic. Use this when answering FFXI questions where "
+            "community knowledge could help — strategy tips, recent observations, "
+            "lesser-known facts, or anything a wiki might not cover. Especially "
+            "useful AFTER ffxi_wiki_search to find players' notes that expand on "
+            "or contradict wiki content. Returns matching notes (text, author, "
+            "date); if it returns no matches, fall back to the wiki and your own "
+            "knowledge."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Keywords to search for in note text. Multiple words "
+                            "are OR-matched for broader recall. Use the key "
+                            "nouns from the user's question — e.g. 'Despot "
+                            "Astral Ring', 'Caedarva NM spawn', 'Red Mage "
+                            "artifact'."
+                        ),
+                    }
+                },
+                "required": ["query"],
+            }
+        },
+    }
+}
+
+SAVE_NOTE_TOOL = {
+    "toolSpec": {
+        "name": "save_note",
+        "description": (
+            "Save a user-contributed piece of FFXI knowledge to a shared notes "
+            "pool so all users can benefit from it in future answers. Call this "
+            "ONLY when the user is explicitly contributing a fact for you to "
+            "remember — phrases like 'remember that…', 'take note…', 'save this…', "
+            "'note that…', 'keep in mind…', 'for future reference…'. Do NOT call "
+            "this for ordinary questions, opinions, or conversational chatter. "
+            "Phrase the saved text as a concise standalone statement that will "
+            "still make sense to a future reader who lacks this conversation's "
+            "context."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "note_text": {
+                        "type": "string",
+                        "description": (
+                            "The fact to save, rewritten as a self-contained "
+                            "statement. Example: user says 'remember the spawn "
+                            "is on Earthsday' → note_text: 'NMs in Caedarva Mire "
+                            "spawn on Earthsday.'"
+                        ),
+                    }
+                },
+                "required": ["note_text"],
+            }
+        },
+    }
+}
+
 
 
 class MoogleLLMClient:
@@ -100,11 +173,17 @@ Your personality traits:
 
 Answer questions about the Final Fantasy XI game, characters, storylines, gameplay mechanics, and lore. Be thorough but keep responses concise (under 2000 characters for Slack).
 
-You have two tools — always prefer them over answering from memory:
+You have four tools — always prefer them over answering from memory:
 
 1. ffxi_item_lookup: Use when the user asks about a specific item's price, vendors, drop sources, or flags. A formatted card is posted to Slack automatically — do NOT repeat the stats. Reply with 1-2 sentences of Moogle flavor only. If the item is NOT found, say so in Moogle voice.
 
 2. ffxi_wiki_search: Use for any FFXI question you are not fully certain about — quests, missions, job abilities, spells, monsters, zones, NPCs, game mechanics, lore. This searches BG-Wiki and falls back to FFXIclopedia automatically. Search first, then answer using the content returned.
+
+3. search_notes: Search the shared pool of user-contributed FFXI knowledge. Call this for FFXI questions where community wisdom might apply, and ALWAYS consider calling it after ffxi_wiki_search to find player notes that expand on or contradict the wiki. If matches come back, weave them into your answer and credit "another adventurer's notes." If no matches, just use the wiki/your knowledge — don't apologise for an empty search.
+
+4. save_note: Call ONLY when the user is explicitly contributing a fact for you to remember ("remember that…", "take note…", "save this…"). Do NOT call for ordinary questions. After saving, acknowledge in 1-2 sentences of Moogle voice.
+
+Some recent notes may already appear below; use search_notes to dig deeper into the full pool by keyword.
 
 Do not guess when you can look it up, kupo!
 
@@ -135,18 +214,27 @@ Remember: Stay in character as a Moogle!"""
             self.logger.addHandler(handler)
 
     def generate_response(self, messages: list, max_tokens: int = 1000,
-                          temperature: float = 0.7) -> tuple:
+                          temperature: float = 0.7, notes: list = None,
+                          note_context: dict = None) -> tuple:
         """Generate a Moogle response via the Bedrock Converse API.
 
         Args:
             messages: Conversation history as simple dicts
                       [{"role": "user"|"assistant", "content": str}, ...].
                       The caller appends the new user turn before calling.
+            notes: User-contributed FFXI notes to inject into the system
+                   prompt for this call only.
+            note_context: Metadata used by the `save_note` tool dispatcher —
+                          {"bucket": str, "author_id": str, "channel_id": str}.
 
         Returns:
             (text, item_lookups) where item_lookups is a list of dicts from
             any ffxi_item_lookup tool calls made during this turn.
         """
+        # Stash context for the in-call tool dispatcher. Safe because each
+        # Lambda invocation gets its own client instance and runs serially.
+        self._note_context = note_context or {}
+
         if not messages:
             messages = [{"role": "user", "content": "Tell me about Final Fantasy!"}]
 
@@ -169,9 +257,15 @@ Remember: Stay in character as a Moogle!"""
         force_tool_first = _looks_like_item_query(str(last_user))
         self.logger.info(f"force_tool_first={force_tool_first}")
 
+        system_text = self.system_prompt
+        notes_section = _format_notes_for_prompt(notes) if notes else ""
+        if notes_section:
+            system_text = f"{system_text}\n\n{notes_section}"
+
         for iteration in range(MAX_TOOL_ITERATIONS):
             force = force_tool_first and iteration == 0
-            response = self._invoke(converse_messages, max_tokens, temperature, force_tool=force)
+            response = self._invoke(converse_messages, max_tokens, temperature,
+                                    system_text=system_text, force_tool=force)
             stop_reason = response.get("stopReason")
             output_message = response["output"]["message"]
             content_blocks = output_message.get("content", [])
@@ -199,14 +293,21 @@ Remember: Stay in character as a Moogle!"""
         )
 
     def _invoke(self, converse_messages: list, max_tokens: int, temperature: float,
-                force_tool: bool = False) -> dict:
-        tool_config: dict = {"tools": [FFXI_ITEM_LOOKUP_TOOL, FFXI_WIKI_SEARCH_TOOL]}
+                system_text: str = None, force_tool: bool = False) -> dict:
+        tool_config: dict = {
+            "tools": [
+                FFXI_ITEM_LOOKUP_TOOL,
+                FFXI_WIKI_SEARCH_TOOL,
+                SEARCH_NOTES_TOOL,
+                SAVE_NOTE_TOOL,
+            ]
+        }
         if force_tool:
             tool_config["toolChoice"] = {"any": {}}
         try:
             return self.client.converse(
                 modelId=self.model_id,
-                system=[{"text": self.system_prompt}],
+                system=[{"text": system_text or self.system_prompt}],
                 messages=converse_messages,
                 toolConfig=tool_config,
                 inferenceConfig={
@@ -263,6 +364,39 @@ Remember: Stay in character as a Moogle!"""
             if not query:
                 return {"found": False, "error": "query is required"}
             return wiki_search(query)
+        if name == "search_notes":
+            ctx = getattr(self, "_note_context", {}) or {}
+            bucket = ctx.get("bucket")
+            if not bucket:
+                self.logger.error("search_notes called without a configured bucket")
+                return {"matches": [], "count": 0, "error": "notes storage is not configured"}
+            query = (tool_input or {}).get("query", "").strip()
+            if not query:
+                return {"matches": [], "count": 0, "error": "query is required"}
+            try:
+                matches = search_notes_in_s3(bucket, query)
+                return {"matches": matches, "count": len(matches), "query": query}
+            except Exception as e:
+                self.logger.error(f"search_notes failed: {e}", exc_info=True)
+                return {"matches": [], "count": 0, "error": str(e)}
+        if name == "save_note":
+            ctx = getattr(self, "_note_context", {}) or {}
+            bucket = ctx.get("bucket")
+            if not bucket:
+                self.logger.error("save_note called without a configured bucket")
+                return {"saved": False, "error": "notes storage is not configured"}
+            text = (tool_input or {}).get("note_text", "").strip()
+            if not text:
+                return {"saved": False, "error": "note_text is required"}
+            try:
+                note = save_note_to_s3(
+                    bucket, text,
+                    ctx.get("author_id", ""), ctx.get("channel_id", ""),
+                )
+                return {"saved": True, "id": note["id"], "text": note["text"]}
+            except Exception as e:
+                self.logger.error(f"save_note failed: {e}", exc_info=True)
+                return {"saved": False, "error": str(e)}
         raise ValueError(f"Unknown tool: {name}")
 
     def set_personality(self, prompt: str):

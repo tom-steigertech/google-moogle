@@ -18,6 +18,7 @@ logger = logging.getLogger()
 logger.setLevel(getattr(logging, LOG_LEVEL))
 
 sqs = boto3.client('sqs')
+s3 = boto3.client('s3')
 agentcore = boto3.client(
     'bedrock-agentcore',
     region_name=os.environ.get('BEDROCK_REGION') or os.environ.get('AWS_REGION', 'us-east-1')
@@ -28,6 +29,13 @@ SLACK_SIGNING_SECRET = os.environ['SLACK_SIGNING_SECRET']
 SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN', '')
 AGENTCORE_MEMORY_ID = os.environ.get('AGENTCORE_MEMORY_ID', '')
 IDLE_MINUTES = int(os.environ.get('SESSION_IDLE_MINUTES', '10'))
+S3_BUCKET_IDEMPOTENCY = os.environ.get('S3_BUCKET_IDEMPOTENCY', '')
+
+# Notes storage — kept in sync with lambda_functions/processing/notes_client.py
+NOTES_KEY = "notes/notes.json"
+MAX_NOTE_LENGTH = 500
+MAX_NOTES_RETAINED = 200
+NOTES_LISTING_LIMIT = 20
 
 def handler(event, context):
     """
@@ -181,6 +189,31 @@ def handler(event, context):
             'headers': {'Content-Type': 'application/json'},
             'body': json.dumps({'text': "Memory cleared, kupo!", 'response_type': 'ephemeral'})
         }
+
+    # Handle /moogle takenote <text> and /moogle notes — inline, no SQS enqueue
+    if is_slash_command:
+        raw_text = payload.get('text', '').strip()
+        text_lower = raw_text.lower()
+
+        if text_lower.startswith('takenote'):
+            note_text = raw_text[len('takenote'):].strip()
+            if not note_text:
+                return _ephemeral("Kupo? You forgot to tell me what to note, kupo!")
+            try:
+                note = _save_note_inline(note_text, slack_user_id, channel_id)
+                return _ephemeral(
+                    f"Kupo! I've noted it down: \"{note['text']}\" (id: {note['id']})"
+                )
+            except Exception as e:
+                logger.error(f"Failed to save note: {e}", exc_info=True)
+                return _ephemeral("Kupo... my pom-pom got tangled. Couldn't save that note!")
+
+        if text_lower == 'notes':
+            try:
+                return _ephemeral(_format_notes_listing(_load_notes_inline()))
+            except Exception as e:
+                logger.error(f"Failed to list notes: {e}", exc_info=True)
+                return _ephemeral("Kupo... my pom-pom got tangled. Couldn't read the notes!")
 
     # Prepare message for SQS
     message = {
@@ -357,6 +390,107 @@ def _clear_session_inline(actor_id: str, session_id: str, cap: int = 200) -> Non
         logger.info(f"Cleared {len(events)} events from session {session_id!r}")
     except Exception as e:
         logger.error(f"Error clearing session {session_id!r}: {e}")
+
+
+def _ephemeral(text: str) -> dict:
+    """Build a Slack ephemeral slash-command response."""
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({'text': text, 'response_type': 'ephemeral'})
+    }
+
+
+def _save_note_inline(text: str, author_slack_id: str, channel_id: str) -> dict:
+    """Append a user note to s3://<bucket>/notes/notes.json.
+
+    Kept in sync with lambda_functions/processing/notes_client.save_note —
+    the initial Lambda is packaged without the processing/ package, so the
+    routine is duplicated here rather than imported.
+    """
+    import uuid
+    from datetime import datetime, timezone
+
+    if not S3_BUCKET_IDEMPOTENCY:
+        raise RuntimeError("S3_BUCKET_IDEMPOTENCY env var is not set")
+
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("note text is empty")
+    if len(text) > MAX_NOTE_LENGTH:
+        text = text[:MAX_NOTE_LENGTH].rstrip() + "…"
+
+    notes = []
+    try:
+        resp = s3.get_object(Bucket=S3_BUCKET_IDEMPOTENCY, Key=NOTES_KEY)
+        loaded = json.loads(resp["Body"].read())
+        if isinstance(loaded, list):
+            notes = loaded
+    except s3.exceptions.NoSuchKey:
+        pass
+    except Exception as e:
+        # If the existing document is unreadable, fall back to starting fresh
+        # rather than losing the user's input. The corrupt file will be
+        # overwritten on the next write.
+        logger.warning(f"Could not load existing notes (starting fresh): {e}")
+
+    note = {
+        "id": uuid.uuid4().hex[:12],
+        "text": text,
+        "author_id": f"slack_{author_slack_id}" if author_slack_id else "",
+        "channel_id": channel_id or "",
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+    notes.append(note)
+    if len(notes) > MAX_NOTES_RETAINED:
+        notes = notes[-MAX_NOTES_RETAINED:]
+
+    s3.put_object(
+        Bucket=S3_BUCKET_IDEMPOTENCY,
+        Key=NOTES_KEY,
+        Body=json.dumps(notes).encode("utf-8"),
+        ContentType="application/json",
+    )
+    logger.info(f"Saved note {note['id']} (total now: {len(notes)})")
+    return note
+
+
+def _load_notes_inline() -> list:
+    """Read s3://<bucket>/notes/notes.json. Returns [] if missing or unreadable."""
+    if not S3_BUCKET_IDEMPOTENCY:
+        raise RuntimeError("S3_BUCKET_IDEMPOTENCY env var is not set")
+    try:
+        resp = s3.get_object(Bucket=S3_BUCKET_IDEMPOTENCY, Key=NOTES_KEY)
+        data = json.loads(resp["Body"].read())
+        return data if isinstance(data, list) else []
+    except s3.exceptions.NoSuchKey:
+        return []
+
+
+def _format_notes_listing(notes: list) -> str:
+    """Render the global notes pool as ephemeral slash-command text, newest first."""
+    if not notes:
+        return ("Kupo! No notes saved yet, kupo! "
+                "Use `/moogle takenote <something>` to add one.")
+
+    total = len(notes)
+    recent = list(reversed(notes[-NOTES_LISTING_LIMIT:]))  # newest first
+    shown = len(recent)
+
+    header = (f"*Moogle notes* ({shown} of {total}, newest first):"
+              if shown < total
+              else f"*Moogle notes* ({total} total):")
+
+    lines = [header]
+    for i, note in enumerate(recent, 1):
+        text = (note.get('text') or '').strip()
+        author_raw = (note.get('author_id') or '')
+        author_slack_id = author_raw.removeprefix('slack_')
+        created = (note.get('created_at') or '')[:10]  # YYYY-MM-DD
+        author = f"<@{author_slack_id}>" if author_slack_id else "unknown"
+        lines.append(f"{i}. \"{text}\" — {author}, {created}")
+
+    return "\n".join(lines)
 
 
 def post_slack_message(channel_id, text, thread_ts=None):

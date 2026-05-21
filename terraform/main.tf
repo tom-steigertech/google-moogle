@@ -64,8 +64,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "idempotency" {
     id     = "expire-old-keys"
     status = "Enabled"
 
+    # Scoped to the idempotency prefix only. Notes (notes/notes.json) live in
+    # this same bucket and must NOT be expired.
     filter {
-      prefix = "" # Applies to all objects
+      prefix = "idempotency/"
     }
 
     expiration {
@@ -305,12 +307,13 @@ resource "aws_lambda_function" "initial" {
 
   environment {
     variables = {
-      SQS_QUEUE_URL        = aws_sqs_queue.processing_queue.url
-      SLACK_SIGNING_SECRET = var.slack_signing_secret
-      SLACK_BOT_TOKEN      = var.slack_bot_token
-      LOG_LEVEL            = var.log_level
-      AGENTCORE_MEMORY_ID  = aws_bedrockagentcore_memory.moogle.id
-      SESSION_IDLE_MINUTES = "10"
+      SQS_QUEUE_URL         = aws_sqs_queue.processing_queue.url
+      SLACK_SIGNING_SECRET  = var.slack_signing_secret
+      SLACK_BOT_TOKEN       = var.slack_bot_token
+      LOG_LEVEL             = var.log_level
+      AGENTCORE_MEMORY_ID   = aws_bedrockagentcore_memory.moogle.id
+      SESSION_IDLE_MINUTES  = "10"
+      S3_BUCKET_IDEMPOTENCY = aws_s3_bucket.idempotency.bucket
     }
   }
 
