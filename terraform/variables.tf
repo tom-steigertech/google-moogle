@@ -87,3 +87,10 @@ variable "easter_egg_user_id" {
   type        = string
   default     = ""
 }
+
+variable "scrapingant_api_key" {
+  description = "ScrapingAnt API key used by the r/ffxi last-resort Reddit search tool. Leave empty to keep the tool dormant."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

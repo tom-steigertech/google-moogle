@@ -11,3 +11,7 @@ slack_bot_token      = "xoxb-your-slack-bot-token-here"
 
 # Optional: leave empty for AWS auto-generation (recommended)
 # api_gateway_api_key = ""
+
+# Optional: ScrapingAnt API key to enable the r/ffxi last-resort Reddit search
+# tool. Leave empty (or omit) to keep the tool dormant.
+# scrapingant_api_key = ""

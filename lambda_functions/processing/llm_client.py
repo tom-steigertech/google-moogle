@@ -13,6 +13,7 @@ import re
 import boto3
 
 from .ffxi_item_lookup import lookup_as_tool_result
+from .ffxi_reddit_search import search_as_tool_result as reddit_search
 from .ffxi_wiki_search import search_as_tool_result as wiki_search
 from .ffxi_zone_map import fetch_zone_maps
 from .notes_client import (
@@ -23,7 +24,14 @@ from .notes_client import (
 
 
 DEFAULT_MODEL_ID = "amazon.nova-lite-v1:0"
-MAX_TOOL_ITERATIONS = 6
+MAX_TOOL_ITERATIONS = 8
+
+# Returned when the model never stops calling tools (extremely rare) so the user
+# gets a friendly reply instead of a hard error.
+TOOL_LOOP_FALLBACK = (
+    "Kupo... I dug through my references but couldn't pull that together into a "
+    "clear answer this time. Try asking again or rephrasing it for me, kupo!"
+)
 
 # Tool definition in Converse API toolSpec format.
 FFXI_ITEM_LOOKUP_TOOL = {
@@ -154,6 +162,41 @@ FFXI_ZONE_MAP_TOOL = {
     }
 }
 
+FFXI_REDDIT_SEARCH_TOOL = {
+    "toolSpec": {
+        "name": "ffxi_reddit_search",
+        "description": (
+            "LAST RESORT — search the r/ffxi subreddit for community discussion. "
+            "Use this ONLY when ffxi_wiki_search AND search_notes have already failed "
+            "to provide an answer, or for questions that are inherently about player "
+            "opinion, experience, or current community consensus (e.g. 'what do players "
+            "think is the best solo job', 'is X content still active', subjective "
+            "recommendations) that a wiki would not cover. Do NOT call this before the "
+            "wiki — it returns unverified forum posts and opinions, not authoritative "
+            "facts. Returns post titles, snippets, and top comments from the most "
+            "relevant thread; treat the content as community opinion and say so when "
+            "you use it."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Search terms for r/ffxi, e.g. "
+                            "'best solo trust setup', "
+                            "'is Dynamis still worth doing', "
+                            "'returning player gil making 2024'."
+                        ),
+                    }
+                },
+                "required": ["query"],
+            }
+        },
+    }
+}
+
 SAVE_NOTE_TOOL = {
     "toolSpec": {
         "name": "save_note",
@@ -213,7 +256,7 @@ Formatting rules (your responses are rendered in Slack):
 - Do NOT use Markdown headers (##, ###) — they do not render in Slack.
 - Do NOT use horizontal rules (---).
 
-You have four tools — always prefer them over answering from memory:
+You have six tools — always prefer them over answering from memory:
 
 1. ffxi_item_lookup: Use when the user asks about a specific item's price, vendors, drop sources, or flags. A formatted card is posted to Slack automatically — do NOT repeat the stats. Reply with 1-2 sentences of Moogle flavor only. If the item is NOT found, say so in Moogle voice.
 
@@ -224,6 +267,8 @@ You have four tools — always prefer them over answering from memory:
 4. save_note: Call ONLY when the user is explicitly contributing a fact for you to remember ("remember that…", "take note…", "save this…"). Do NOT call for ordinary questions. After saving, acknowledge in 1-2 sentences of Moogle voice.
 
 5. ffxi_zone_map: Fetch the zone map image(s) and BG-Wiki page text when the user asks about zone layout, navigation within a zone, or how to move between areas or sub-maps. The tool returns both the page text and the map images — read both carefully. Answer ONLY from what the page text and maps show; never blend in knowledge about surrounding zones. For multi-map zones, the sub-maps are all part of the same zone — transitions between them appear as passages or exits on the map images, not as zone lines to other zones.
+
+6. ffxi_reddit_search: LAST RESORT ONLY. Search the r/ffxi subreddit for community discussion. Use this ONLY after ffxi_wiki_search and search_notes have failed to answer, OR for inherently opinion/experience-based questions a wiki cannot cover (e.g. "what's the best solo job", "is this content still worth doing", subjective recommendations). The results are unverified player posts and opinions, NOT authoritative facts — never prefer Reddit over the wiki, and when you do use it, make clear you're relaying community opinion from r/ffxi rather than confirmed fact.
 
 Some recent notes may already appear below; use search_notes to dig deeper into the full pool by keyword.
 
@@ -306,8 +351,22 @@ Remember: Stay in character as a Moogle!"""
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             force = force_tool_first and iteration == 0
+            final_iteration = iteration == MAX_TOOL_ITERATIONS - 1
+
+            # On the last allowed pass, nudge the model to stop calling tools and
+            # answer with what it has. The nudge goes in the system prompt rather
+            # than a user turn so we don't break Converse's strict user/assistant
+            # role alternation (the previous turn is already a tool-result user turn).
+            call_system = system_text
+            if final_iteration:
+                call_system = (
+                    f"{system_text}\n\nIMPORTANT: You have gathered enough "
+                    "information. Provide your final answer NOW using what you "
+                    "already have. Do NOT call any more tools."
+                )
+
             response = self._invoke(converse_messages, max_tokens, temperature,
-                                    system_text=system_text, force_tool=force)
+                                    system_text=call_system, force_tool=force)
             stop_reason = response.get("stopReason")
             output_message = response["output"]["message"]
             content_blocks = output_message.get("content", [])
@@ -323,16 +382,29 @@ Remember: Stay in character as a Moogle!"""
                 self.logger.debug(f"Response preview: {text[:100]}...")
                 return text, all_item_lookups
 
+            # Model still wants a tool even on its final chance. Degrade
+            # gracefully: return any text it produced, else a friendly fallback —
+            # never raise, so the user always gets a reply.
+            if final_iteration:
+                text = _extract_text(content_blocks)
+                if text:
+                    self.logger.warning(
+                        "Tool-use loop hit cap; returning partial text answer"
+                    )
+                    return text, all_item_lookups
+                self.logger.error(
+                    "Tool-use loop hit cap with no usable text; returning fallback"
+                )
+                return TOOL_LOOP_FALLBACK, all_item_lookups
+
             # Append assistant turn and user turn with tool results.
             converse_messages.append(output_message)
             tool_results, captured_items = self._run_tool_calls(content_blocks)
             all_item_lookups.extend(captured_items)
             converse_messages.append({"role": "user", "content": tool_results})
 
-        self.logger.error(f"Tool-use loop exceeded {MAX_TOOL_ITERATIONS} iterations")
-        raise RuntimeError(
-            f"Converse tool-use loop did not converge after {MAX_TOOL_ITERATIONS} iterations"
-        )
+        # Unreachable: the final iteration always returns above.
+        return TOOL_LOOP_FALLBACK, all_item_lookups
 
     def _invoke(self, converse_messages: list, max_tokens: int, temperature: float,
                 system_text: str = None, force_tool: bool = False) -> dict:
@@ -343,6 +415,7 @@ Remember: Stay in character as a Moogle!"""
                 SEARCH_NOTES_TOOL,
                 SAVE_NOTE_TOOL,
                 FFXI_ZONE_MAP_TOOL,
+                FFXI_REDDIT_SEARCH_TOOL,
             ]
         }
         if force_tool:
@@ -413,6 +486,11 @@ Remember: Stay in character as a Moogle!"""
             if not query:
                 return {"found": False, "error": "query is required"}
             return wiki_search(query)
+        if name == "ffxi_reddit_search":
+            query = (tool_input or {}).get("query", "").strip()
+            if not query:
+                return {"found": False, "error": "query is required"}
+            return reddit_search(query)
         if name == "search_notes":
             ctx = getattr(self, "_note_context", {}) or {}
             bucket = ctx.get("bucket")

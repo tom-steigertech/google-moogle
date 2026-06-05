@@ -2,11 +2,11 @@ terraform {
   required_version = ">= 1.0"
 
   backend "s3" {
-    bucket         = "ff-moogle-bot-terraform-state"
-    key            = "terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    use_lockfile   = true
+    bucket       = "ff-moogle-bot-terraform-state"
+    key          = "terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
   }
 
   required_providers {
@@ -153,7 +153,7 @@ resource "aws_dynamodb_table" "terraform_locks" {
 
 # AgentCore Memory for multi-turn conversation state
 resource "aws_bedrockagentcore_memory" "moogle" {
-  name                          = "${replace(var.project_name, "-", "_")}_memory"
+  name                  = "${replace(var.project_name, "-", "_")}_memory"
   event_expiry_duration = 7
 }
 
@@ -347,6 +347,7 @@ resource "aws_lambda_function" "processing" {
       LOG_LEVEL             = var.log_level
       AGENTCORE_MEMORY_ID   = aws_bedrockagentcore_memory.moogle.id
       SESSION_IDLE_MINUTES  = "10"
+      SCRAPINGANT_API_KEY   = var.scrapingant_api_key
     }
   }
 
@@ -761,8 +762,8 @@ resource "aws_cloudwatch_metric_alarm" "runaway_protection" {
   treat_missing_data  = "notBreaching"
 
   alarm_actions = [
-    aws_sns_topic.runaway_alarm.arn,    # triggers throttle Lambda
-    aws_sns_topic.notifications.arn,    # sends to Slack via Chatbot
+    aws_sns_topic.runaway_alarm.arn, # triggers throttle Lambda
+    aws_sns_topic.notifications.arn, # sends to Slack via Chatbot
   ]
 }
 
