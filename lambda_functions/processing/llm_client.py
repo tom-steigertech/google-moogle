@@ -26,6 +26,13 @@ from .notes_client import (
 DEFAULT_MODEL_ID = "amazon.nova-lite-v1:0"
 MAX_TOOL_ITERATIONS = 8
 
+# Deep-planning tier. Complex, multi-step questions (cross-referencing several
+# facts, arithmetic over looked-up values, dependent lookup chains) are escalated
+# from the front-line model to this more capable model, which gets a planning
+# system prompt and a larger tool-iteration budget.
+DEFAULT_PLANNER_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
+MAX_PLANNER_ITERATIONS = 15
+
 # Returned when the model never stops calling tools (extremely rare) so the user
 # gets a friendly reply instead of a hard error.
 TOOL_LOOP_FALLBACK = (
@@ -202,6 +209,45 @@ FFXI_REDDIT_SEARCH_TOOL = {
     }
 }
 
+ESCALATE_TO_PLANNER_TOOL = {
+    "toolSpec": {
+        "name": "escalate_to_planner",
+        "description": (
+            "Hand a COMPLEX, multi-step question off to the deep-planning Moogle. "
+            "Call this INSTEAD of answering when the question cannot be resolved by a "
+            "single lookup and instead requires planning: cross-referencing several "
+            "separate facts, doing arithmetic over looked-up values, or a chain of "
+            "dependent lookups whose later steps depend on earlier results. Classic "
+            "examples: 'how many <X> fights do I need for enough <Y> to finish the "
+            "<Z> upgrade', 'what's the cheapest way to skill up <craft> from 40 to 60', "
+            "'compare the gil-per-hour of farming A vs B'. Do NOT call this for a single "
+            "item price/drop/recipe lookup or a single quest/mechanic question — answer "
+            "those yourself with the other tools. When you call this, the user is told "
+            "it will take a moment and a more capable Moogle takes over the whole "
+            "question, so do not also try to answer it yourself."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": (
+                            "A clear one- or two-sentence restatement of what the user "
+                            "ultimately wants computed or planned, phrased so the planner "
+                            "can act on it without seeing the rest of the chat. e.g. "
+                            "'Compute how many Glavoid fights are needed to gather enough "
+                            "Glavoid Shells to complete the Magian Trial path for the "
+                            "knife upgrade.'"
+                        ),
+                    }
+                },
+                "required": ["goal"],
+            }
+        },
+    }
+}
+
 SAVE_NOTE_TOOL = {
     "toolSpec": {
         "name": "save_note",
@@ -275,15 +321,37 @@ You have six tools — always prefer them over answering from memory:
 
 6. ffxi_reddit_search: LAST RESORT ONLY. Search the r/ffxi subreddit for community discussion. Use this ONLY after ffxi_wiki_search and search_notes have failed to answer, OR for inherently opinion/experience-based questions a wiki cannot cover (e.g. "what's the best solo job", "is this content still worth doing", subjective recommendations). The results are unverified player posts and opinions, NOT authoritative facts — never prefer Reddit over the wiki, and when you do use it, make clear you're relaying community opinion from r/ffxi rather than confirmed fact.
 
+7. escalate_to_planner: Use for COMPLEX, multi-step questions that a single lookup can't answer — ones that need cross-referencing several facts, arithmetic over looked-up values, or a chain of dependent lookups (e.g. "how many X fights for enough Y to finish the Z upgrade", "cheapest way to skill up a craft from 40 to 60", "compare gil/hour of farming A vs B"). When a question is like that, call escalate_to_planner with a one-line restatement of the goal INSTEAD of trying to answer it yourself — a more capable Moogle will take over the whole question. Do NOT escalate ordinary single-item or single-topic questions; handle those with the tools above.
+
 Some recent notes may already appear below; use search_notes to dig deeper into the full pool by keyword.
 
 Do not guess when you can look it up, kupo!
 
 Remember: Stay in character as a Moogle!"""
 
+    # Appended to the personality when a question is escalated to the planner
+    # tier. The planner keeps Moogle voice but works the problem methodically and
+    # does NOT have the escalate_to_planner tool (it is the escalation target).
+    PLANNER_ADDENDUM = """
+
+You have been handed a COMPLEX question that needs multi-step planning. Work it methodically, kupo:
+
+1. PLAN: Break the goal into the concrete sub-facts you need (e.g. how many of an item a trial consumes, how many drop per fight, the drop rate, the number of trial stages).
+2. GATHER: Use your tools to look up EACH sub-fact. Prefer ffxi_wiki_search for trial/quest/mechanic details and ffxi_item_lookup for item drop/source data. Do NOT guess numbers you can look up.
+3. COMPUTE: Do the arithmetic explicitly. State the numbers you found and show the calculation so the user can follow it.
+4. ANSWER: Lead with a clear, direct answer to the original question, then a short breakdown of how you got there. Call out any assumptions or ranges (e.g. drop-rate variance) plainly.
+
+If a needed number genuinely cannot be found after searching, say so and give your best estimate clearly labeled as an estimate. Accuracy of the numbers matters most here — but stay in Moogle character.
+
+Follow the Slack formatting rules from above EXACTLY in your final answer: no Markdown headers (##, ###), no horizontal rules (---). Use **Bold Label:** lines for sections and "- " for bullets. Keep the whole answer under ~2000 characters."""
+
     def __init__(self, model_id: str = None, region_name: str = None,
-                 log_level: str = "ERROR", system_prompt: str = None):
+                 log_level: str = "ERROR", system_prompt: str = None,
+                 planner_model_id: str = None):
         self.model_id = model_id or os.environ.get("BEDROCK_MODEL_ID", DEFAULT_MODEL_ID)
+        self.planner_model_id = (planner_model_id
+                                 or os.environ.get("PLANNER_MODEL_ID")
+                                 or DEFAULT_PLANNER_MODEL_ID)
         self.region_name = (region_name
                             or os.environ.get("BEDROCK_REGION")
                             or os.environ.get("AWS_REGION")
@@ -307,7 +375,8 @@ Remember: Stay in character as a Moogle!"""
 
     def generate_response(self, messages: list, max_tokens: int = 1000,
                           temperature: float = 0.7, notes: list = None,
-                          note_context: dict = None) -> tuple:
+                          note_context: dict = None,
+                          escalation_notifier=None) -> tuple:
         """Generate a Moogle response via the Bedrock Converse API.
 
         Args:
@@ -318,10 +387,15 @@ Remember: Stay in character as a Moogle!"""
                    prompt for this call only.
             note_context: Metadata used by the `save_note` tool dispatcher —
                           {"bucket": str, "author_id": str, "channel_id": str}.
+            escalation_notifier: Optional callable(goal: str) invoked when the
+                          front-line model escalates a complex question to the
+                          planner tier. The caller uses it to post an interim
+                          "this will take a moment" message to the user.
 
         Returns:
-            (text, item_lookups) where item_lookups is a list of dicts from
-            any ffxi_item_lookup tool calls made during this turn.
+            (text, item_lookups, escalated) where item_lookups is a list of dicts
+            from any ffxi_item_lookup tool calls made during this turn, and
+            escalated is True if the deep-planning tier produced the answer.
         """
         # Stash context for the in-call tool dispatcher. Safe because each
         # Lambda invocation gets its own client instance and runs serially.
@@ -340,23 +414,84 @@ Remember: Stay in character as a Moogle!"""
         self.logger.info(f"Invoking {self.model_id} via Converse API with {len(messages)} message(s)")
         self.logger.debug(f"Last user message: {str(last_user)[:100]}...")
 
-        # Convert simple {role, content} dicts to Converse content-block format.
-        converse_messages = _to_converse_messages(messages)
-        all_item_lookups = []
-
-        # Force a tool call on the first iteration when the question looks like an
-        # item query.  Nova Lite tends to skip the tool with long conversation history.
-        force_tool_first = _looks_like_item_query(str(last_user))
-        self.logger.info(f"force_tool_first={force_tool_first}")
-
         system_text = self.system_prompt
         notes_section = _format_notes_for_prompt(notes) if notes else ""
         if notes_section:
             system_text = f"{system_text}\n\n{notes_section}"
 
-        for iteration in range(MAX_TOOL_ITERATIONS):
-            force = force_tool_first and iteration == 0
-            final_iteration = iteration == MAX_TOOL_ITERATIONS - 1
+        # Force a tool call on the first iteration when the question looks like an
+        # item query.  Smaller models tend to skip the tool with long history.
+        force_tool_first = _looks_like_item_query(str(last_user))
+        self.logger.info(f"force_tool_first={force_tool_first}")
+
+        # --- Front-line tier: the everyday model, with the escalate tool. ---
+        converse_messages = _to_converse_messages(messages)
+        text, item_lookups, escalate_goal = self._run_tool_loop(
+            converse_messages,
+            system_text=system_text,
+            model_id=self.model_id,
+            max_iters=MAX_TOOL_ITERATIONS,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            include_escalate=True,
+            force_first=force_tool_first,
+        )
+
+        if escalate_goal is None:
+            return text, item_lookups, False
+
+        # --- Planner tier: a more capable model with a planning prompt. ---
+        self.logger.info(f"Escalating to planner ({self.planner_model_id}): {escalate_goal!r}")
+        if escalation_notifier:
+            try:
+                escalation_notifier(escalate_goal)
+            except Exception as e:
+                self.logger.error(f"escalation_notifier failed: {e}", exc_info=True)
+
+        planner_system = f"{system_text}{self.PLANNER_ADDENDUM}"
+        # Run the planner on the full conversation plus an explicit planning brief
+        # so it has both context and a crisp restatement of the goal.
+        planner_messages = _to_converse_messages(messages)
+        planner_messages.append({
+            "role": "assistant",
+            "content": [{"text": (
+                "This is a complex question, kupo — let me work it out step by step."
+            )}],
+        })
+        planner_messages.append({
+            "role": "user",
+            "content": [{"text": (
+                f"Please work out this goal carefully: {escalate_goal}"
+            )}],
+        })
+        planner_text, planner_items, _ = self._run_tool_loop(
+            planner_messages,
+            system_text=planner_system,
+            model_id=self.planner_model_id,
+            max_iters=MAX_PLANNER_ITERATIONS,
+            max_tokens=max(max_tokens, 1500),
+            temperature=temperature,
+            include_escalate=False,
+            force_first=False,
+        )
+        return planner_text, planner_items, True
+
+    def _run_tool_loop(self, converse_messages: list, system_text: str,
+                       model_id: str, max_iters: int, max_tokens: int,
+                       temperature: float, include_escalate: bool,
+                       force_first: bool = False) -> tuple:
+        """Run the Converse tool-use loop until a final answer or escalation.
+
+        Returns (text, item_lookups, escalate_goal). When the model calls
+        escalate_to_planner (only possible if include_escalate is True), the loop
+        stops immediately and returns (None, item_lookups, goal); the caller is
+        responsible for running the planner tier. Otherwise escalate_goal is None.
+        """
+        all_item_lookups = []
+
+        for iteration in range(max_iters):
+            force = force_first and iteration == 0
+            final_iteration = iteration == max_iters - 1
 
             # On the last allowed pass, nudge the model to stop calling tools and
             # answer with what it has. The nudge goes in the system prompt rather
@@ -371,13 +506,14 @@ Remember: Stay in character as a Moogle!"""
                 )
 
             response = self._invoke(converse_messages, max_tokens, temperature,
-                                    system_text=call_system, force_tool=force)
+                                    system_text=call_system, force_tool=force,
+                                    model_id=model_id, include_escalate=include_escalate)
             stop_reason = response.get("stopReason")
             output_message = response["output"]["message"]
             content_blocks = output_message.get("content", [])
 
             self.logger.info(
-                f"Iteration {iteration}: stopReason={stop_reason}, "
+                f"[{model_id}] Iteration {iteration}: stopReason={stop_reason}, "
                 f"blocks={len(content_blocks)}"
             )
 
@@ -385,7 +521,16 @@ Remember: Stay in character as a Moogle!"""
                 text = _extract_text(content_blocks)
                 self.logger.info(f"Final response length: {len(text)}")
                 self.logger.debug(f"Response preview: {text[:100]}...")
-                return text, all_item_lookups
+                return text, all_item_lookups, None
+
+            # If the model chose to escalate, stop here and hand the goal back to
+            # the caller. We abandon this transcript (the dangling tool_use never
+            # needs a tool_result because the planner runs a fresh conversation).
+            if include_escalate:
+                goal = _find_escalation_goal(content_blocks)
+                if goal is not None:
+                    self.logger.info(f"escalate_to_planner requested: {goal!r}")
+                    return None, all_item_lookups, goal
 
             # Model still wants a tool even on its final chance. Degrade
             # gracefully: return any text it produced, else a friendly fallback —
@@ -396,11 +541,11 @@ Remember: Stay in character as a Moogle!"""
                     self.logger.warning(
                         "Tool-use loop hit cap; returning partial text answer"
                     )
-                    return text, all_item_lookups
+                    return text, all_item_lookups, None
                 self.logger.error(
                     "Tool-use loop hit cap with no usable text; returning fallback"
                 )
-                return TOOL_LOOP_FALLBACK, all_item_lookups
+                return TOOL_LOOP_FALLBACK, all_item_lookups, None
 
             # Append assistant turn and user turn with tool results.
             converse_messages.append(output_message)
@@ -409,25 +554,27 @@ Remember: Stay in character as a Moogle!"""
             converse_messages.append({"role": "user", "content": tool_results})
 
         # Unreachable: the final iteration always returns above.
-        return TOOL_LOOP_FALLBACK, all_item_lookups
+        return TOOL_LOOP_FALLBACK, all_item_lookups, None
 
     def _invoke(self, converse_messages: list, max_tokens: int, temperature: float,
-                system_text: str = None, force_tool: bool = False) -> dict:
-        tool_config: dict = {
-            "tools": [
-                FFXI_ITEM_LOOKUP_TOOL,
-                FFXI_WIKI_SEARCH_TOOL,
-                SEARCH_NOTES_TOOL,
-                SAVE_NOTE_TOOL,
-                FFXI_ZONE_MAP_TOOL,
-                FFXI_REDDIT_SEARCH_TOOL,
-            ]
-        }
+                system_text: str = None, force_tool: bool = False,
+                model_id: str = None, include_escalate: bool = True) -> dict:
+        tools = [
+            FFXI_ITEM_LOOKUP_TOOL,
+            FFXI_WIKI_SEARCH_TOOL,
+            SEARCH_NOTES_TOOL,
+            SAVE_NOTE_TOOL,
+            FFXI_ZONE_MAP_TOOL,
+            FFXI_REDDIT_SEARCH_TOOL,
+        ]
+        if include_escalate:
+            tools.append(ESCALATE_TO_PLANNER_TOOL)
+        tool_config: dict = {"tools": tools}
         if force_tool:
             tool_config["toolChoice"] = {"any": {}}
         try:
             return self.client.converse(
-                modelId=self.model_id,
+                modelId=model_id or self.model_id,
                 system=[{"text": system_text or self.system_prompt}],
                 messages=converse_messages,
                 toolConfig=tool_config,
@@ -626,6 +773,16 @@ _ITEM_QUERY_PATTERNS = re.compile(
 def _looks_like_item_query(text: str) -> bool:
     """Return True if the text looks like a question about a specific FFXI item."""
     return bool(_ITEM_QUERY_PATTERNS.search(text))
+
+
+def _find_escalation_goal(content_blocks: list):
+    """Return the goal string if the model called escalate_to_planner, else None."""
+    for block in content_blocks:
+        tool_use = block.get("toolUse")
+        if tool_use and tool_use.get("name") == "escalate_to_planner":
+            goal = (tool_use.get("input") or {}).get("goal", "")
+            return goal.strip() or "the user's question"
+    return None
 
 
 _THINKING_RE = re.compile(r"<thinking>.*?</thinking>", re.DOTALL | re.IGNORECASE)

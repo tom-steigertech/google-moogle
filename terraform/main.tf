@@ -162,7 +162,7 @@ resource "aws_sqs_queue" "processing_queue" {
   name                       = "${var.project_name}-processing-queue"
   message_retention_seconds  = 3600
   receive_wait_time_seconds  = 5
-  visibility_timeout_seconds = 60 # Must be >= Lambda timeout (60s)
+  visibility_timeout_seconds = 360 # Must be >= processing Lambda timeout (300s)
 }
 
 # IAM Role for Lambda functions
@@ -329,8 +329,11 @@ resource "aws_lambda_function" "processing" {
   role          = aws_iam_role.lambda_role.arn
   handler       = "processing.handler"
   runtime       = "python3.11"
-  timeout       = 60
-  memory_size   = 512
+  # 300s to accommodate the deep-planning tier, which runs a more capable model
+  # through a longer multi-step tool loop. Must stay <= the SQS queue's
+  # visibility_timeout_seconds so a slow run isn't redelivered mid-flight.
+  timeout     = 300
+  memory_size = 512
 
   filename         = "../lambda_functions/processing_lambda.zip"
   source_code_hash = filebase64sha256("../lambda_functions/processing_lambda.zip")
@@ -340,6 +343,7 @@ resource "aws_lambda_function" "processing" {
   environment {
     variables = {
       BEDROCK_MODEL_ID      = var.bedrock_model_id
+      PLANNER_MODEL_ID      = var.planner_model_id
       BEDROCK_REGION        = var.aws_region
       SLACK_BOT_TOKEN       = var.slack_bot_token
       S3_BUCKET_IDEMPOTENCY = aws_s3_bucket.idempotency.bucket

@@ -93,7 +93,7 @@ def run_local(memory_id: str, idle_minutes: int = 30) -> bool:
 
         messages = prior + [{"role": "user", "content": user_msg}]
         try:
-            answer, _ = llm.generate_response(messages)
+            answer, _, _ = llm.generate_response(messages)
             ok(f"LLM responded ({len(answer)} chars)")
             info(f"  {answer[:200]}{'...' if len(answer) > 200 else ''}")
             passes += 1

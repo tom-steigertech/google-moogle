@@ -10,6 +10,12 @@ variable "bedrock_model_id" {
   default     = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 
+variable "planner_model_id" {
+  description = "Bedrock model ID for the deep-planning tier. Complex, multi-step questions are escalated from bedrock_model_id to this more capable model. Uses the us. cross-region inference profile (ACTIVE in this account)."
+  type        = string
+  default     = "us.anthropic.claude-sonnet-4-6"
+}
+
 variable "slack_signing_secret" {
   description = "Slack signing secret for request validation"
   type        = string

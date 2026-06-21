@@ -61,11 +61,13 @@ def main():
 
     try:
         messages = [{"role": "user", "content": args.question}]
-        text, item_lookups = client.generate_response(
+        text, item_lookups, escalated = client.generate_response(
             messages=messages,
             max_tokens=args.max_tokens,
             temperature=args.temperature,
         )
+        if escalated:
+            print("\n[escalated to planner tier]")
         if item_lookups:
             print(f"\nItem lookups ({len(item_lookups)}):")
             for item in item_lookups:

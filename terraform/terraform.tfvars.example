@@ -9,6 +9,10 @@ slack_bot_token      = "xoxb-your-slack-bot-token-here"
 # bedrock_model_id = "amazon.nova-pro-v1:0"
 # bedrock_model_id = "anthropic.claude-haiku-4-5-20251001-v1:0"
 
+# Optional: override the deep-planning tier model. Complex, multi-step questions
+# are escalated from bedrock_model_id to this more capable model.
+# planner_model_id = "us.anthropic.claude-sonnet-4-6"
+
 # Optional: leave empty for AWS auto-generation (recommended)
 # api_gateway_api_key = ""
 

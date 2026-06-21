@@ -141,9 +141,23 @@ def handler(event, context):
                 logger.error(f"Failed to load notes: {notes_err}")
                 notes_for_context = []
 
+            # Post an interim "this will take a moment" message if the LLM
+            # escalates a complex question to the deep-planning tier.
+            def _notify_escalation(goal: str):
+                try:
+                    logger.info(f"Posting escalation notice for goal: {truncate_text(goal)}")
+                    slack_client.send_response(
+                        channel_id=channel_id,
+                        text=_escalation_notice(goal),
+                        thread_ts=thread_ts,
+                        is_mention=is_mention,
+                    )
+                except Exception as notice_err:
+                    logger.error(f"Failed to post escalation notice: {notice_err}")
+
             # Generate response via LLM (Claude on Bedrock + tool use)
             logger.info("Calling Bedrock Converse API")
-            answer, item_lookups = llm_client.generate_response(
+            answer, item_lookups, escalated = llm_client.generate_response(
                 messages,
                 notes=notes_for_context,
                 note_context={
@@ -151,63 +165,82 @@ def handler(event, context):
                     "author_id": actor_id,
                     "channel_id": channel_id,
                 },
+                escalation_notifier=_notify_escalation,
             )
-            logger.info(f"Bedrock response received, length: {len(answer)}, item_lookups: {len(item_lookups)}")
-
-            # Post item data cards first (found items only; LLM handles not-found).
-            # Non-fatal: a card failure shouldn't block the flavor text or memory save.
-            for item_data in item_lookups:
-                if _card_is_informative(item_data):
-                    blocks = slack_client.format_item_card(item_data)
-                    if blocks:
-                        item_name = item_data.get("name", "Item")
-                        logger.info(f"Posting item card for: {item_name}")
-                        try:
-                            card_resp = slack_client.send_blocks(
-                                channel_id=channel_id,
-                                blocks=blocks,
-                                text=f"Item data: {item_name}",
-                                thread_ts=thread_ts,
-                                is_mention=is_mention,
-                            )
-                            # If drops overflow the card, post the full list in a thread on the card
-                            drops = item_data.get("drops", [])
-                            if len(drops) > MoogleSlackClient.DROPS_INLINE or item_data.get("drops_truncated"):
-                                card_ts = card_resp.get("ts") if card_resp else None
-                                if card_ts:
-                                    drop_blocks = slack_client.format_drops_thread(item_data)
-                                    if drop_blocks:
-                                        logger.info(f"Posting full drop list thread for: {item_name}")
-                                        slack_client.send_blocks(
-                                            channel_id=channel_id,
-                                            blocks=drop_blocks,
-                                            text=f"Full drop list for {item_name}",
-                                            thread_ts=card_ts,
-                                        )
-                        except Exception as card_err:
-                            logger.error(f"Failed to post item card for {item_name}: {card_err}")
-
-            # Only suppress LLM flavor text when at least one item card actually
-            # carries acquisition info (vendors, drops, crafting, or AH). A
-            # "found" item with none of that (e.g. a craft-only page we couldn't
-            # parse) yields a near-empty card, so we let the LLM's text answer
-            # through to fill the gap instead of leaving the user with a bare card.
-            any_informative_card = any(
-                _card_is_informative(il) for il in item_lookups
+            logger.info(
+                f"Bedrock response received, length: {len(answer)}, "
+                f"item_lookups: {len(item_lookups)}, escalated: {escalated}"
             )
-            if not any_informative_card:
-                logger.info("Sending response to Slack")
+
+            if escalated:
+                # The planner tier returns a synthesized prose answer that already
+                # weaves in any looked-up numbers, so we post it directly and skip
+                # the item cards (they'd be redundant supplementary noise here).
+                logger.info("Posting planner answer (escalated)")
                 try:
                     slack_client.send_response(
                         channel_id=channel_id,
                         text=answer,
                         thread_ts=thread_ts,
-                        is_mention=is_mention
+                        is_mention=is_mention,
                     )
                 except Exception as slack_err:
-                    logger.error(f"Failed to post flavor text: {slack_err}")
+                    logger.error(f"Failed to post planner answer: {slack_err}")
             else:
-                logger.info("Item card posted — suppressing LLM flavor text")
+                # Post item data cards first (found items only; LLM handles not-found).
+                # Non-fatal: a card failure shouldn't block the flavor text or memory save.
+                for item_data in item_lookups:
+                    if _card_is_informative(item_data):
+                        blocks = slack_client.format_item_card(item_data)
+                        if blocks:
+                            item_name = item_data.get("name", "Item")
+                            logger.info(f"Posting item card for: {item_name}")
+                            try:
+                                card_resp = slack_client.send_blocks(
+                                    channel_id=channel_id,
+                                    blocks=blocks,
+                                    text=f"Item data: {item_name}",
+                                    thread_ts=thread_ts,
+                                    is_mention=is_mention,
+                                )
+                                # If drops overflow the card, post the full list in a thread on the card
+                                drops = item_data.get("drops", [])
+                                if len(drops) > MoogleSlackClient.DROPS_INLINE or item_data.get("drops_truncated"):
+                                    card_ts = card_resp.get("ts") if card_resp else None
+                                    if card_ts:
+                                        drop_blocks = slack_client.format_drops_thread(item_data)
+                                        if drop_blocks:
+                                            logger.info(f"Posting full drop list thread for: {item_name}")
+                                            slack_client.send_blocks(
+                                                channel_id=channel_id,
+                                                blocks=drop_blocks,
+                                                text=f"Full drop list for {item_name}",
+                                                thread_ts=card_ts,
+                                            )
+                            except Exception as card_err:
+                                logger.error(f"Failed to post item card for {item_name}: {card_err}")
+
+                # Only suppress LLM flavor text when at least one item card actually
+                # carries acquisition info (vendors, drops, crafting, or AH). A
+                # "found" item with none of that (e.g. a craft-only page we couldn't
+                # parse) yields a near-empty card, so we let the LLM's text answer
+                # through to fill the gap instead of leaving the user with a bare card.
+                any_informative_card = any(
+                    _card_is_informative(il) for il in item_lookups
+                )
+                if not any_informative_card:
+                    logger.info("Sending response to Slack")
+                    try:
+                        slack_client.send_response(
+                            channel_id=channel_id,
+                            text=answer,
+                            thread_ts=thread_ts,
+                            is_mention=is_mention
+                        )
+                    except Exception as slack_err:
+                        logger.error(f"Failed to post flavor text: {slack_err}")
+                else:
+                    logger.info("Item card posted — suppressing LLM flavor text")
 
             # Persist turns to AgentCore Memory (best-effort; don't fail the request)
             if MEMORY_ID and actor_id and session_id:
@@ -242,6 +275,19 @@ def handler(event, context):
             _delete_sqs_message(SQS_QUEUE_URL, receipt_handle)
     
     return {'statusCode': 200}
+
+
+def _escalation_notice(goal: str) -> str:
+    """Moogle-voice interim message shown while the planner tier works.
+
+    Posted as soon as the front-line model escalates so the user knows a more
+    careful (and slower) answer is coming rather than staring at silence.
+    """
+    goal = truncate_text((goal or "").strip(), 200)
+    return (
+        f"Ooh, that's a meaty one, kupo! Let me put my full pom-pom power to it "
+        f"and work out: _{goal}_\n\nGive me a moment, kupo kupo!"
+    )
 
 
 def _card_is_informative(item_data: dict) -> bool:
