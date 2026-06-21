@@ -157,7 +157,7 @@ def handler(event, context):
             # Post item data cards first (found items only; LLM handles not-found).
             # Non-fatal: a card failure shouldn't block the flavor text or memory save.
             for item_data in item_lookups:
-                if item_data.get("found"):
+                if _card_is_informative(item_data):
                     blocks = slack_client.format_item_card(item_data)
                     if blocks:
                         item_name = item_data.get("name", "Item")
@@ -187,10 +187,15 @@ def handler(event, context):
                         except Exception as card_err:
                             logger.error(f"Failed to post item card for {item_name}: {card_err}")
 
-            # Only send LLM flavor text when no item card was posted.
-            # When an item is found, the card contains all the information.
-            any_item_found = any(il.get("found") for il in item_lookups)
-            if not any_item_found:
+            # Only suppress LLM flavor text when at least one item card actually
+            # carries acquisition info (vendors, drops, crafting, or AH). A
+            # "found" item with none of that (e.g. a craft-only page we couldn't
+            # parse) yields a near-empty card, so we let the LLM's text answer
+            # through to fill the gap instead of leaving the user with a bare card.
+            any_informative_card = any(
+                _card_is_informative(il) for il in item_lookups
+            )
+            if not any_informative_card:
                 logger.info("Sending response to Slack")
                 try:
                     slack_client.send_response(
@@ -237,6 +242,25 @@ def handler(event, context):
             _delete_sqs_message(SQS_QUEUE_URL, receipt_handle)
     
     return {'statusCode': 200}
+
+
+def _card_is_informative(item_data: dict) -> bool:
+    """True if an item lookup result has acquisition info worth a card.
+
+    Used to decide whether to suppress the LLM's flavor text: a found item with
+    no vendors, drops, crafting, or auction-house data produces a bare card, so
+    we keep the flavor text in that case.
+    """
+    if not item_data.get("found"):
+        return False
+    return bool(
+        item_data.get("vendors")
+        or item_data.get("drops")
+        or item_data.get("synthesis")
+        or item_data.get("synthesis_crafts")
+        or item_data.get("how_to_obtain")
+        or item_data.get("auction_house")
+    )
 
 
 def _is_duplicate(s3_bucket: str, request_id: str) -> bool:

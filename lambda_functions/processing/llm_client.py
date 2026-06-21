@@ -40,10 +40,15 @@ FFXI_ITEM_LOOKUP_TOOL = {
         "description": (
             "Look up a specific Final Fantasy XI item on FFXIclopedia and return "
             "structured data: Rare/Ex/Aux flags, item type, stack size, NPC sell "
-            "price, vendors (NPC, zone, price), and drop sources (monster, zone). "
-            "Call this whenever the user asks about a concrete FFXI item by name "
-            "- for example its price, where to buy it, which monsters drop it, "
-            "or its flags. Do not call it for general lore questions, character "
+            "price, vendors (NPC, zone, price), drop sources (monster, zone), AND "
+            "how the item is obtained — crafting/synthesis recipes (craft skill + "
+            "level), auction-house availability and category, and a 'how to obtain' "
+            "summary. Call this whenever the user asks about a concrete FFXI item by "
+            "name — its price, where to buy/get/farm it, how to obtain it, which "
+            "monsters drop it, how it's crafted, or its flags. This is the right "
+            "tool for crafting ingredients too (e.g. 'where can I get Cornstarch'): "
+            "it returns the synthesis recipe and AH info even when the item has no "
+            "vendors or drops. Do not call it for general lore questions, character "
             "questions, or items from other Final Fantasy titles."
         ),
         "inputSchema": {
@@ -258,7 +263,7 @@ Formatting rules (your responses are rendered in Slack):
 
 You have six tools — always prefer them over answering from memory:
 
-1. ffxi_item_lookup: Use when the user asks about a specific item's price, vendors, drop sources, or flags. A formatted card is posted to Slack automatically — do NOT repeat the stats. Reply with 1-2 sentences of Moogle flavor only. If the item is NOT found, say so in Moogle voice.
+1. ffxi_item_lookup: Use when the user asks about a specific item's price, vendors, drop sources, flags, OR how to obtain/craft it (including crafting ingredients like Cornstarch — the tool returns the synthesis recipe and auction-house info even when an item has no vendors or drops). When asked "where can I get those ingredients?", call this once per ingredient. A formatted card is posted to Slack automatically — do NOT repeat the stats. Reply with 1-2 sentences of Moogle flavor only. If the lookup comes back with no vendors, drops, or crafting info, no card is posted — in that case answer the question yourself in Moogle voice (use ffxi_wiki_search if needed). If the item is NOT found, the result may include "suggestions" (close item names) — offer those to the user in Moogle voice (e.g. "Did you mean Royal Grape or San d'Orian Grape, kupo?"). If "suggestions" is empty, say you couldn't find it.
 
 2. ffxi_wiki_search: Use for any FFXI question you are not fully certain about — quests, missions, job abilities, spells, monsters, zones, NPCs, game mechanics, lore. This searches BG-Wiki and falls back to FFXIclopedia automatically. Search first, then answer using the content returned.
 

@@ -186,6 +186,16 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
             "text": {"type": "plain_text", "text": name, "emoji": True}
         })
 
+        # Note when the lookup resolved a fuzzy match (e.g. "Grape" -> "Royal Grape").
+        query = item_data.get("query")
+        matched = item_data.get("matched_title")
+        if matched and query and matched.strip().lower() != query.strip().lower():
+            blocks.append({
+                "type": "context",
+                "elements": [{"type": "mrkdwn",
+                              "text": f"_Closest match for “{query}”_"}]
+            })
+
         # Metadata row
         meta_parts = []
         if item_data.get("item_type"):
@@ -251,7 +261,76 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
                 "text": {"type": "mrkdwn", "text": "\n".join(lines)}
             })
 
+        # How to Obtain — crafting / auction-house / acquisition info.
+        # Essential for craft-only or AH-only items (e.g. Cornstarch) that have
+        # no vendors and no drops and would otherwise show a near-empty card.
+        crafts = item_data.get("synthesis_crafts") or []
+        crystal = item_data.get("synthesis_crystal")
+        ingredients = item_data.get("synthesis_ingredients") or []
+        synthesis = item_data.get("synthesis")
+        how = item_data.get("how_to_obtain")
+        ah = item_data.get("auction_house")
+        ah_cat = item_data.get("ah_category")
+
+        obtain_lines = []
+        if crafts:
+            craft_str = ", ".join(f"{c['skill']} ({c['level']})" for c in crafts)
+            obtain_lines.append(f"*Crafted via:* {craft_str}")
+            # Prefer a tidy crystal + ingredients recipe; fall back to raw text.
+            recipe_parts = []
+            if crystal:
+                recipe_parts.append(crystal)
+            for ing in ingredients:
+                qty = ing.get("qty") or 1
+                recipe_parts.append(f"{qty}× {ing['name']}" if qty > 1 else ing["name"])
+            if recipe_parts:
+                obtain_lines.append("*Ingredients:* " + " + ".join(recipe_parts))
+            elif synthesis:
+                obtain_lines.append(f"_{MoogleSlackClient._trim(synthesis, 240)}_")
+        elif synthesis:
+            obtain_lines.append(f"_{MoogleSlackClient._trim(synthesis, 240)}_")
+        if ah:
+            ah_line = "*Auction House:* available"
+            if ah_cat:
+                ah_line += f"  _{ah_cat}_"
+            obtain_lines.append(ah_line)
+        if how:
+            # Strip the leading "Auction House Category : <cat>" we already surfaced.
+            extra = how
+            if ah_cat:
+                extra = re.sub(
+                    rf"^Auction House Category\s*:?\s*{re.escape(ah_cat)}\s*",
+                    "", extra,
+                ).strip()
+            if extra:
+                obtain_lines.append(MoogleSlackClient._trim(extra, 280))
+
+        if obtain_lines:
+            blocks.append({"type": "divider"})
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn",
+                         "text": "*How to Obtain*\n" + "\n".join(obtain_lines)}
+            })
+
+        # Used in recipes — compact snippet (full list lives on the wiki).
+        used_in = item_data.get("used_in")
+        if used_in:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn",
+                         "text": f"*Used in recipes:* {MoogleSlackClient._trim(used_in, 240)}"}
+            })
+
         return blocks
+
+    @staticmethod
+    def _trim(text: str, limit: int) -> str:
+        """Collapse whitespace and truncate to ``limit`` chars with an ellipsis."""
+        text = re.sub(r"\s+", " ", text or "").strip()
+        if len(text) <= limit:
+            return text
+        return text[:limit].rstrip() + "…"
 
     @staticmethod
     def format_drops_thread(item_data: dict) -> list:
