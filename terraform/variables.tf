@@ -16,6 +16,12 @@ variable "planner_model_id" {
   default     = "us.anthropic.claude-sonnet-4-6"
 }
 
+variable "enable_planner_escalation" {
+  description = "Kill-switch for the more expensive Sonnet planner tier. Temporarily false while cost-monitoring strategies are built; set true to re-enable escalation."
+  type        = bool
+  default     = false
+}
+
 variable "slack_signing_secret" {
   description = "Slack signing secret for request validation"
   type        = string

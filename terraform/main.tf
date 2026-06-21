@@ -342,16 +342,17 @@ resource "aws_lambda_function" "processing" {
 
   environment {
     variables = {
-      BEDROCK_MODEL_ID      = var.bedrock_model_id
-      PLANNER_MODEL_ID      = var.planner_model_id
-      BEDROCK_REGION        = var.aws_region
-      SLACK_BOT_TOKEN       = var.slack_bot_token
-      S3_BUCKET_IDEMPOTENCY = aws_s3_bucket.idempotency.bucket
-      SQS_QUEUE_URL         = aws_sqs_queue.processing_queue.url
-      LOG_LEVEL             = var.log_level
-      AGENTCORE_MEMORY_ID   = aws_bedrockagentcore_memory.moogle.id
-      SESSION_IDLE_MINUTES  = "10"
-      SCRAPINGANT_API_KEY   = var.scrapingant_api_key
+      BEDROCK_MODEL_ID          = var.bedrock_model_id
+      PLANNER_MODEL_ID          = var.planner_model_id
+      ENABLE_PLANNER_ESCALATION = tostring(var.enable_planner_escalation)
+      BEDROCK_REGION            = var.aws_region
+      SLACK_BOT_TOKEN           = var.slack_bot_token
+      S3_BUCKET_IDEMPOTENCY     = aws_s3_bucket.idempotency.bucket
+      SQS_QUEUE_URL             = aws_sqs_queue.processing_queue.url
+      LOG_LEVEL                 = var.log_level
+      AGENTCORE_MEMORY_ID       = aws_bedrockagentcore_memory.moogle.id
+      SESSION_IDLE_MINUTES      = "10"
+      SCRAPINGANT_API_KEY       = var.scrapingant_api_key
     }
   }
 

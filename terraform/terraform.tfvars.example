@@ -13,6 +13,10 @@ slack_bot_token      = "xoxb-your-slack-bot-token-here"
 # are escalated from bedrock_model_id to this more capable model.
 # planner_model_id = "us.anthropic.claude-sonnet-4-6"
 
+# Kill-switch for the expensive planner tier. Defaults to false (disabled).
+# Set true to allow escalation to planner_model_id.
+# enable_planner_escalation = true
+
 # Optional: leave empty for AWS auto-generation (recommended)
 # api_gateway_api_key = ""
 

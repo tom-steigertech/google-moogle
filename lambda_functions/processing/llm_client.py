@@ -352,6 +352,13 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
         self.planner_model_id = (planner_model_id
                                  or os.environ.get("PLANNER_MODEL_ID")
                                  or DEFAULT_PLANNER_MODEL_ID)
+        # Kill-switch for the more expensive planner tier. When disabled, the
+        # escalate_to_planner tool is never offered, so every question is answered
+        # by the front-line model only. Toggled via the ENABLE_PLANNER_ESCALATION
+        # env var (default on) without a code change.
+        self.escalation_enabled = _env_truthy(
+            os.environ.get("ENABLE_PLANNER_ESCALATION"), default=True
+        )
         self.region_name = (region_name
                             or os.environ.get("BEDROCK_REGION")
                             or os.environ.get("AWS_REGION")
@@ -424,7 +431,9 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
         force_tool_first = _looks_like_item_query(str(last_user))
         self.logger.info(f"force_tool_first={force_tool_first}")
 
-        # --- Front-line tier: the everyday model, with the escalate tool. ---
+        # --- Front-line tier: the everyday model. The escalate tool is only
+        # offered when the planner tier is enabled. ---
+        self.logger.info(f"planner escalation enabled: {self.escalation_enabled}")
         converse_messages = _to_converse_messages(messages)
         text, item_lookups, escalate_goal = self._run_tool_loop(
             converse_messages,
@@ -433,7 +442,7 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
             max_iters=MAX_TOOL_ITERATIONS,
             max_tokens=max_tokens,
             temperature=temperature,
-            include_escalate=True,
+            include_escalate=self.escalation_enabled,
             force_first=force_tool_first,
         )
 
@@ -773,6 +782,13 @@ _ITEM_QUERY_PATTERNS = re.compile(
 def _looks_like_item_query(text: str) -> bool:
     """Return True if the text looks like a question about a specific FFXI item."""
     return bool(_ITEM_QUERY_PATTERNS.search(text))
+
+
+def _env_truthy(value, default: bool = False) -> bool:
+    """Parse a boolean-ish env var. None/unset returns the given default."""
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
 
 
 def _find_escalation_goal(content_blocks: list):
