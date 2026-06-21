@@ -17,9 +17,9 @@ variable "planner_model_id" {
 }
 
 variable "enable_planner_escalation" {
-  description = "Kill-switch for the more expensive Sonnet planner tier. Temporarily false while cost-monitoring strategies are built; set true to re-enable escalation."
+  description = "Kill-switch for the more expensive Sonnet planner tier. Enabled now that cost monitoring is in place (account + Bedrock budgets, anomaly detection, and a forecasted-overage auto-shutdown). Set false to disable escalation again."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "monthly_budget_limit" {
@@ -116,6 +116,12 @@ variable "log_level" {
     condition     = contains(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], upper(var.log_level))
     error_message = "LOG_LEVEL must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL."
   }
+}
+
+variable "ops_log_channel_id" {
+  description = "Slack channel ID where per-request operation summaries (question, timestamp, tools called) are posted. Defaults to #code-testing. Set to an empty string to disable Slack ops logging — CloudWatch ops logging always remains on. The Moogle bot must be a member of this channel to post."
+  type        = string
+  default     = "C03HE46DXC7"
 }
 
 variable "easter_egg_user_id" {

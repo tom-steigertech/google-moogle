@@ -353,6 +353,7 @@ resource "aws_lambda_function" "processing" {
       AGENTCORE_MEMORY_ID       = aws_bedrockagentcore_memory.moogle.id
       SESSION_IDLE_MINUTES      = "10"
       SCRAPINGANT_API_KEY       = var.scrapingant_api_key
+      OPS_LOG_SLACK_CHANNEL_ID  = var.ops_log_channel_id
     }
   }
 

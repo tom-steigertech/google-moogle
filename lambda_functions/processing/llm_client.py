@@ -366,6 +366,12 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
         self.client = boto3.client("bedrock-runtime", region_name=self.region_name)
         self.system_prompt = system_prompt or self.DEFAULT_PERSONALITY
 
+        # Per-request audit trail of tool calls, as [{"name", "input"}, ...].
+        # Reset at the start of each generate_response and read afterwards by the
+        # handler for operational logging. Spans both the front-line and planner
+        # tiers in the order the tools were invoked.
+        self.last_tool_calls = []
+
         self.logger = logging.getLogger(__name__)
         self._configure_logging(log_level)
 
@@ -403,10 +409,15 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
             (text, item_lookups, escalated) where item_lookups is a list of dicts
             from any ffxi_item_lookup tool calls made during this turn, and
             escalated is True if the deep-planning tier produced the answer.
+
+        Side effect:
+            Populates self.last_tool_calls with every tool invoked this turn
+            (name + input summary), in call order, for operational logging.
         """
         # Stash context for the in-call tool dispatcher. Safe because each
         # Lambda invocation gets its own client instance and runs serially.
         self._note_context = note_context or {}
+        self.last_tool_calls = []
 
         if not messages:
             messages = [{"role": "user", "content": "Tell me about Final Fantasy!"}]
@@ -451,6 +462,9 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
 
         # --- Planner tier: a more capable model with a planning prompt. ---
         self.logger.info(f"Escalating to planner ({self.planner_model_id}): {escalate_goal!r}")
+        self.last_tool_calls.append(
+            {"name": "escalate_to_planner", "input": _summarize_tool_input({"goal": escalate_goal})}
+        )
         if escalation_notifier:
             try:
                 escalation_notifier(escalate_goal)
@@ -609,6 +623,9 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
             tool_use_id = tool_use["toolUseId"]
 
             self.logger.info(f"Tool call: {tool_name} input={tool_input}")
+            self.last_tool_calls.append(
+                {"name": tool_name, "input": _summarize_tool_input(tool_input)}
+            )
             try:
                 output = self._dispatch_tool(tool_name, tool_input)
                 # Image-returning tools (e.g. ffxi_zone_map) return a pre-built
@@ -782,6 +799,21 @@ _ITEM_QUERY_PATTERNS = re.compile(
 def _looks_like_item_query(text: str) -> bool:
     """Return True if the text looks like a question about a specific FFXI item."""
     return bool(_ITEM_QUERY_PATTERNS.search(text))
+
+
+def _summarize_tool_input(tool_input: dict) -> str:
+    """One-line summary of a tool's input for the operation audit log.
+
+    Returns the first non-empty string argument (item_name/query/zone_name/goal/
+    note_text), truncated, so the ops log reads e.g. ffxi_item_lookup(Bone Chip).
+    """
+    if not tool_input:
+        return ""
+    for value in tool_input.values():
+        if isinstance(value, str) and value.strip():
+            summary = value.strip()
+            return summary[:77] + "..." if len(summary) > 80 else summary
+    return ""
 
 
 def _env_truthy(value, default: bool = False) -> bool:

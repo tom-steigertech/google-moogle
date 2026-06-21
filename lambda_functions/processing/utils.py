@@ -39,6 +39,31 @@ def setup_logging(log_level: str = None) -> logging.Logger:
     return logger
 
 
+_ops_logger = None
+
+
+def get_ops_logger() -> logging.Logger:
+    """Return the dedicated operational-audit logger.
+
+    Always emits at INFO regardless of the global LOG_LEVEL (which stays ERROR in
+    production) so per-request operation summaries reliably reach CloudWatch
+    without enabling verbose application logging. propagate=False keeps these
+    summaries off the root logger so they are neither duplicated nor suppressed
+    by the root level.
+    """
+    global _ops_logger
+    if _ops_logger is None:
+        lg = logging.getLogger("moogle.ops")
+        lg.setLevel(logging.INFO)
+        lg.propagate = False
+        if not lg.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(message)s"))
+            lg.addHandler(handler)
+        _ops_logger = lg
+    return _ops_logger
+
+
 def extract_question(payload: dict) -> str:
     """Extract the user's question from various Slack payload formats.
     

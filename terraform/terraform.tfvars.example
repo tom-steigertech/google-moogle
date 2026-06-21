@@ -27,6 +27,12 @@ slack_bot_token      = "xoxb-your-slack-bot-token-here"
 # bot to zero concurrency (runaway shutdown). Recover with the
 # runaway_recovery_command output.
 
+# Optional: Slack channel for per-request operation logs (question, time, tools
+# called). Defaults to #code-testing (C03HE46DXC7). Empty string disables the
+# Slack post (CloudWatch ops logging always stays on). The bot must be a member
+# of this channel to post.
+# ops_log_channel_id = "C03HE46DXC7"
+
 # Optional: leave empty for AWS auto-generation (recommended)
 # api_gateway_api_key = ""
 

@@ -8,13 +8,21 @@ This module contains the Lambda handler entry point and orchestrates:
 """
 
 import json
+from datetime import datetime, timezone
+
 import boto3
 
 from .llm_client import MoogleLLMClient
 from .memory_client import load_recent_turns, save_turn
 from .notes_client import recent_notes
 from .slack_client import MoogleSlackClient
-from .utils import setup_logging, extract_question, truncate_text, get_env_var
+from .utils import (
+    setup_logging,
+    get_ops_logger,
+    extract_question,
+    truncate_text,
+    get_env_var,
+)
 
 # Initialize AWS clients
 s3 = boto3.client('s3')
@@ -22,6 +30,7 @@ sqs = boto3.client('sqs')
 
 # Initialize module-level logger (will be configured on first use)
 logger = None
+ops_logger = None
 llm_client = None
 slack_client = None
 
@@ -31,11 +40,14 @@ def _initialize_clients():
     
     This is called lazily on first request to ensure environment is ready.
     """
-    global logger, llm_client, slack_client
-    
+    global logger, ops_logger, llm_client, slack_client
+
     if logger is None:
         logger = setup_logging()
-    
+
+    if ops_logger is None:
+        ops_logger = get_ops_logger()
+
     if llm_client is None:
         llm_client = MoogleLLMClient(
             model_id=get_env_var('BEDROCK_MODEL_ID', required=False),
@@ -251,6 +263,17 @@ def handler(event, context):
                 except Exception as mem_err:
                     logger.error(f"Failed to save turns to memory: {mem_err}")
 
+            # Operational audit log: the question asked, the time, and which tools
+            # were used to build the answer. Goes to CloudWatch and the ops Slack
+            # channel. Best-effort — never lets a logging failure break the request.
+            _log_operation(
+                request_id=request_id,
+                question=question,
+                channel_id=channel_id,
+                tool_calls=getattr(llm_client, "last_tool_calls", []),
+                escalated=escalated,
+            )
+
             logger.info(f"Successfully processed request {request_id}")
             _delete_sqs_message(SQS_QUEUE_URL, receipt_handle)
             
@@ -288,6 +311,58 @@ def _escalation_notice(goal: str) -> str:
         f"Ooh, that's a meaty one, kupo! Let me put my full pom-pom power to it "
         f"and work out: _{goal}_\n\nGive me a moment, kupo kupo!"
     )
+
+
+def _log_operation(request_id, question, channel_id, tool_calls, escalated):
+    """Emit an end-of-processing operation summary to CloudWatch and Slack.
+
+    Records the initial question, the date/time, and the tools called while
+    building the answer. CloudWatch gets a compact, greppable JSON line (filter
+    on "MOOGLE_OPS" in Logs Insights); the ops Slack channel gets a readable
+    card. Both paths are best-effort and never raise.
+
+    Tool calls arrive as [{"name", "input"}, ...] from MoogleLLMClient.
+    """
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    tool_calls = tool_calls or []
+
+    # --- CloudWatch (always on, independent of LOG_LEVEL via the ops logger) ---
+    try:
+        ops_logger.info("MOOGLE_OPS " + json.dumps({
+            "request_id": request_id,
+            "timestamp": timestamp,
+            "question": truncate_text(question or "", 500),
+            "channel_id": channel_id,
+            "escalated": bool(escalated),
+            "tool_count": len(tool_calls),
+            "tools": tool_calls,
+        }))
+    except Exception as cw_err:
+        logger.error(f"Failed to write operation log to CloudWatch: {cw_err}")
+
+    # --- Slack ops channel (optional; skipped when not configured) ---
+    ops_channel = get_env_var("OPS_LOG_SLACK_CHANNEL_ID", required=False, default="")
+    if not ops_channel:
+        return
+    try:
+        if tool_calls:
+            tools_str = ", ".join(
+                f"`{t.get('name', '?')}`"
+                + (f" ({t['input']})" if t.get("input") else "")
+                for t in tool_calls
+            )
+        else:
+            tools_str = "_none — answered directly_"
+        text = (
+            f"*Moogle op log* · {timestamp}\n"
+            f"*Question:* {truncate_text(question or '(none)', 300)}\n"
+            f"*Asked in:* <#{channel_id}>\n"
+            f"*Tools called:* {tools_str}\n"
+            f"*Planner escalation:* {'yes' if escalated else 'no'}"
+        )
+        slack_client.send_response(channel_id=ops_channel, text=text)
+    except Exception as slack_err:
+        logger.error(f"Failed to post operation log to Slack: {slack_err}")
 
 
 def _card_is_informative(item_data: dict) -> bool:
