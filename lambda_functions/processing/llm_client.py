@@ -16,6 +16,8 @@ from .ffxi_item_lookup import lookup_as_tool_result
 from .ffxi_reddit_search import search_as_tool_result as reddit_search
 from .ffxi_wiki_search import search_as_tool_result as wiki_search
 from .ffxi_zone_map import fetch_zone_maps
+from .ffxiah_lookup import lookup_as_tool_result as ffxiah_lookup
+from .ffxidb_lookup import lookup_as_tool_result as ffxidb_lookup
 from .notes_client import (
     save_note as save_note_to_s3,
     search_notes as search_notes_in_s3,
@@ -67,6 +69,74 @@ FFXI_ITEM_LOOKUP_TOOL = {
                         "description": (
                             "The exact in-game name of the FFXI item, e.g. "
                             "'Bone Chip', 'Excalibur', 'Imperial Bronze Piece'."
+                        ),
+                    }
+                },
+                "required": ["item_name"],
+            }
+        },
+    }
+}
+
+FFXIAH_LOOKUP_TOOL = {
+    "toolSpec": {
+        "name": "ffxiah_lookup",
+        "description": (
+            "Look up a Final Fantasy XI item's AUCTION HOUSE market data on "
+            "ffxiah.com for the SYLPH server: the current player-market value "
+            "(median single price and stack price), how fast it sells (sale rate "
+            "in units sold per day), recent price range (min/max/average), and "
+            "current stock. All figures are for the Sylph server specifically. "
+            "Call this when the user asks what an item is WORTH on the AH, how much "
+            "it sells for, its market/resale value, or how quickly/easily it sells. "
+            "This is DIFFERENT from ffxi_item_lookup (which gives the fixed NPC "
+            "vendor/sell price, drop sources, and crafting recipe) — use ffxiah_lookup "
+            "specifically for live player-driven Auction House pricing and selling "
+            "speed. Items with no Sylph AH sales (Rare/Ex, or simply unsold on Sylph) "
+            "return no_ah_data=true. Unlike item cards, this data is NOT auto-posted — "
+            "relay the relevant numbers in your answer."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "item_name": {
+                        "type": "string",
+                        "description": (
+                            "The exact in-game name of the FFXI item, e.g. "
+                            "'Fire Crystal', 'Hi-Potion', 'Scintillating Rhomb'."
+                        ),
+                    }
+                },
+                "required": ["item_name"],
+            }
+        },
+    }
+}
+
+FFXIDB_LOOKUP_TOOL = {
+    "toolSpec": {
+        "name": "ffxidb_lookup",
+        "description": (
+            "Look up a Final Fantasy XI item on ffxidb.com — an alternate item "
+            "database — and return its description, type, equippable jobs and level, "
+            "stats, and known drop sources (monster, zone, drop chance). Use this as "
+            "a SECONDARY information source for general item facts: when "
+            "ffxi_item_lookup did not return what the user asked, to cross-reference "
+            "another database, or for an item's description/stats/level/job "
+            "requirements. For Auction House prices and selling speed use "
+            "ffxiah_lookup instead; for the primary item card (vendors, drops, "
+            "crafting) use ffxi_item_lookup. Relay the relevant facts in your answer."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "item_name": {
+                        "type": "string",
+                        "description": (
+                            "The exact in-game name of the FFXI item, e.g. "
+                            "'Excalibur', 'Bone Chip', 'Hi-Potion'."
                         ),
                     }
                 },
@@ -307,21 +377,25 @@ Formatting rules (your responses are rendered in Slack):
 - Do NOT use Markdown headers (##, ###) — they do not render in Slack.
 - Do NOT use horizontal rules (---).
 
-You have six tools — always prefer them over answering from memory:
+You have the tools below — always prefer them over answering from memory:
 
 1. ffxi_item_lookup: Use when the user asks about a specific item's price, vendors, drop sources, flags, OR how to obtain/craft it (including crafting ingredients like Cornstarch — the tool returns the synthesis recipe and auction-house info even when an item has no vendors or drops). When asked "where can I get those ingredients?", call this once per ingredient. A formatted card is posted to Slack automatically — do NOT repeat the stats. Reply with 1-2 sentences of Moogle flavor only. If the lookup comes back with no vendors, drops, or crafting info, no card is posted — in that case answer the question yourself in Moogle voice (use ffxi_wiki_search if needed). If the item is NOT found, the result may include "suggestions" (close item names) — offer those to the user in Moogle voice (e.g. "Did you mean Royal Grape or San d'Orian Grape, kupo?"). If "suggestions" is empty, say you couldn't find it.
 
-2. ffxi_wiki_search: Use for any FFXI question you are not fully certain about — quests, missions, job abilities, spells, monsters, zones, NPCs, game mechanics, lore. This searches BG-Wiki and falls back to FFXIclopedia automatically. Search first, then answer using the content returned.
+2. ffxiah_lookup: Use when the user asks what an item is WORTH on the Auction House — its market/resale value, current price, how much it sells for, or how fast or easily it sells. Returns the median single price, stack price, sale rate (units sold per day), price range, and stock from ffxiah.com. All figures are for the SYLPH server — say so when you give prices (e.g. "on Sylph, kupo"). This is the live player-market price, distinct from ffxi_item_lookup's fixed NPC sell price. No card is posted for this — state the relevant numbers in your answer (in Moogle voice). If the result has no_ah_data, tell the user it has no Sylph AH sales (it may be Rare/Ex and unsellable, or just hasn't sold on Sylph).
 
-3. search_notes: Search the shared pool of user-contributed FFXI knowledge. Call this for FFXI questions where community wisdom might apply, and ALWAYS consider calling it after ffxi_wiki_search to find player notes that expand on or contradict the wiki. If matches come back, weave them into your answer and credit "another adventurer's notes." If no matches, just use the wiki/your knowledge — don't apologise for an empty search.
+3. ffxidb_lookup: A SECONDARY item database (ffxidb.com) returning an item's description, type, equippable jobs/level, stats, and drop sources. Use it to cross-reference or when ffxi_item_lookup didn't return what the user needs (e.g. an item's description, level, or job requirements). Prefer ffxi_item_lookup for the main item card and ffxiah_lookup for prices; reach for ffxidb_lookup as a backup or extra-detail source. Relay the relevant facts in your answer.
 
-4. save_note: Call ONLY when the user is explicitly contributing a fact for you to remember ("remember that…", "take note…", "save this…"). Do NOT call for ordinary questions. After saving, acknowledge in 1-2 sentences of Moogle voice.
+4. ffxi_wiki_search: Use for any FFXI question you are not fully certain about — quests, missions, job abilities, spells, monsters, zones, NPCs, game mechanics, lore. This searches BG-Wiki and falls back to FFXIclopedia automatically. Search first, then answer using the content returned.
 
-5. ffxi_zone_map: Fetch the zone map image(s) and BG-Wiki page text when the user asks about zone layout, navigation within a zone, or how to move between areas or sub-maps. The tool returns both the page text and the map images — read both carefully. Answer ONLY from what the page text and maps show; never blend in knowledge about surrounding zones. For multi-map zones, the sub-maps are all part of the same zone — transitions between them appear as passages or exits on the map images, not as zone lines to other zones.
+5. search_notes: Search the shared pool of user-contributed FFXI knowledge. Call this for FFXI questions where community wisdom might apply, and ALWAYS consider calling it after ffxi_wiki_search to find player notes that expand on or contradict the wiki. If matches come back, weave them into your answer and credit "another adventurer's notes." If no matches, just use the wiki/your knowledge — don't apologise for an empty search.
 
-6. ffxi_reddit_search: LAST RESORT ONLY. Search the r/ffxi subreddit for community discussion. Use this ONLY after ffxi_wiki_search and search_notes have failed to answer, OR for inherently opinion/experience-based questions a wiki cannot cover (e.g. "what's the best solo job", "is this content still worth doing", subjective recommendations). The results are unverified player posts and opinions, NOT authoritative facts — never prefer Reddit over the wiki, and when you do use it, make clear you're relaying community opinion from r/ffxi rather than confirmed fact.
+6. save_note: Call ONLY when the user is explicitly contributing a fact for you to remember ("remember that…", "take note…", "save this…"). Do NOT call for ordinary questions. After saving, acknowledge in 1-2 sentences of Moogle voice.
 
-7. escalate_to_planner: Use for COMPLEX, multi-step questions that a single lookup can't answer — ones that need cross-referencing several facts, arithmetic over looked-up values, or a chain of dependent lookups (e.g. "how many X fights for enough Y to finish the Z upgrade", "cheapest way to skill up a craft from 40 to 60", "compare gil/hour of farming A vs B"). When a question is like that, call escalate_to_planner with a one-line restatement of the goal INSTEAD of trying to answer it yourself — a more capable Moogle will take over the whole question. Do NOT escalate ordinary single-item or single-topic questions; handle those with the tools above.
+7. ffxi_zone_map: Fetch the zone map image(s) and BG-Wiki page text when the user asks about zone layout, navigation within a zone, or how to move between areas or sub-maps. The tool returns both the page text and the map images — read both carefully. Answer ONLY from what the page text and maps show; never blend in knowledge about surrounding zones. For multi-map zones, the sub-maps are all part of the same zone — transitions between them appear as passages or exits on the map images, not as zone lines to other zones.
+
+8. ffxi_reddit_search: LAST RESORT ONLY. Search the r/ffxi subreddit for community discussion. Use this ONLY after ffxi_wiki_search and search_notes have failed to answer, OR for inherently opinion/experience-based questions a wiki cannot cover (e.g. "what's the best solo job", "is this content still worth doing", subjective recommendations). The results are unverified player posts and opinions, NOT authoritative facts — never prefer Reddit over the wiki, and when you do use it, make clear you're relaying community opinion from r/ffxi rather than confirmed fact.
+
+9. escalate_to_planner: Use for COMPLEX, multi-step questions that a single lookup can't answer — ones that need cross-referencing several facts, arithmetic over looked-up values, or a chain of dependent lookups (e.g. "how many X fights for enough Y to finish the Z upgrade", "cheapest way to skill up a craft from 40 to 60", "compare gil/hour of farming A vs B"). When a question is like that, call escalate_to_planner with a one-line restatement of the goal INSTEAD of trying to answer it yourself — a more capable Moogle will take over the whole question. Do NOT escalate ordinary single-item or single-topic questions; handle those with the tools above.
 
 Some recent notes may already appear below; use search_notes to dig deeper into the full pool by keyword.
 
@@ -584,6 +658,8 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
                 model_id: str = None, include_escalate: bool = True) -> dict:
         tools = [
             FFXI_ITEM_LOOKUP_TOOL,
+            FFXIAH_LOOKUP_TOOL,
+            FFXIDB_LOOKUP_TOOL,
             FFXI_WIKI_SEARCH_TOOL,
             SEARCH_NOTES_TOOL,
             SAVE_NOTE_TOOL,
@@ -659,6 +735,16 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
             if not item_name:
                 return {"found": False, "error": "item_name is required"}
             return lookup_as_tool_result(item_name)
+        if name == "ffxiah_lookup":
+            item_name = (tool_input or {}).get("item_name", "").strip()
+            if not item_name:
+                return {"found": False, "error": "item_name is required"}
+            return ffxiah_lookup(item_name)
+        if name == "ffxidb_lookup":
+            item_name = (tool_input or {}).get("item_name", "").strip()
+            if not item_name:
+                return {"found": False, "error": "item_name is required"}
+            return ffxidb_lookup(item_name)
         if name == "ffxi_wiki_search":
             query = (tool_input or {}).get("query", "").strip()
             if not query:
