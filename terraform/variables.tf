@@ -22,6 +22,30 @@ variable "enable_planner_escalation" {
   default     = false
 }
 
+variable "monthly_budget_limit" {
+  description = "Monthly total-account cost budget in USD. Notifications fire at 80% actual, 100% actual, and 100% forecasted spend, delivered to Slack via the notifications SNS topic."
+  type        = number
+  default     = 10
+}
+
+variable "bedrock_monthly_budget_limit" {
+  description = "Monthly cost budget in USD scoped to the Amazon Bedrock service (Claude token usage). Same notification thresholds as the account budget."
+  type        = number
+  default     = 8
+}
+
+variable "budget_alert_emails" {
+  description = "Email addresses that receive AWS Budgets alert notifications, in addition to the Slack SNS topic. Budgets sends these directly (no SNS subscription confirmation required)."
+  type        = list(string)
+  default     = ["tom@steigertech.com", "tsteiger@gmail.com"]
+}
+
+variable "anomaly_alert_threshold" {
+  description = "Minimum total dollar impact (USD) of a detected Amazon Bedrock cost anomaly before an alert is sent to Slack. Uses ANOMALY_TOTAL_IMPACT_ABSOLUTE."
+  type        = number
+  default     = 5
+}
+
 variable "slack_signing_secret" {
   description = "Slack signing secret for request validation"
   type        = string

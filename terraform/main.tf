@@ -723,14 +723,14 @@ resource "aws_sns_topic_policy" "runaway_alarm" {
         }
       },
       {
+        # No SourceAccount condition: AWS Budgets does not reliably send
+        # aws:SourceAccount on its SNS publish, and a condition can silently
+        # block delivery (matches the notifications topic's budgets grant).
         Sid       = "AllowBudgetsPublish"
         Effect    = "Allow"
         Principal = { Service = "budgets.amazonaws.com" }
         Action    = "SNS:Publish"
         Resource  = aws_sns_topic.runaway_alarm.arn
-        Condition = {
-          StringEquals = { "AWS:SourceAccount" = data.aws_caller_identity.current.account_id }
-        }
       }
     ]
   })
@@ -802,6 +802,24 @@ resource "aws_sns_topic_policy" "notifications" {
             "AWS:SourceAccount" = data.aws_caller_identity.current.account_id
           }
         }
+      },
+      {
+        Sid       = "AllowBudgetsPublish"
+        Effect    = "Allow"
+        Principal = { Service = "budgets.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.notifications.arn
+      },
+      {
+        # AWS Cost Anomaly Detection publishes via costalerts.amazonaws.com.
+        # Per AWS's documented topic policy this principal is granted without a
+        # SourceAccount condition (the service does not always send it, and a
+        # condition can silently block anomaly delivery).
+        Sid       = "AllowCostAnomalyPublish"
+        Effect    = "Allow"
+        Principal = { Service = "costalerts.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.notifications.arn
       }
     ]
   })

@@ -17,6 +17,16 @@ slack_bot_token      = "xoxb-your-slack-bot-token-here"
 # Set true to allow escalation to planner_model_id.
 # enable_planner_escalation = true
 
+# Cost governance (AWS Budgets + Cost Anomaly Detection). All alerts route to
+# the notifications SNS topic -> #code-testing via AWS Chatbot. Defaults shown.
+# monthly_budget_limit         = 10  # total-account monthly budget (USD)
+# bedrock_monthly_budget_limit = 8   # Amazon Bedrock-only monthly budget (USD)
+# anomaly_alert_threshold      = 5   # min $ impact of a Bedrock anomaly to alert
+# budget_alert_emails          = ["tom@steigertech.com", "tsteiger@gmail.com"]
+# NOTE: the Bedrock budget's forecasted-100% threshold also auto-throttles the
+# bot to zero concurrency (runaway shutdown). Recover with the
+# runaway_recovery_command output.
+
 # Optional: leave empty for AWS auto-generation (recommended)
 # api_gateway_api_key = ""
 
