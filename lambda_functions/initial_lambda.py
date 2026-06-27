@@ -222,6 +222,19 @@ def handler(event, context):
                 logger.error(f"Failed to list notes: {e}", exc_info=True)
                 return _ephemeral("Kupo... my pom-pom got tangled. Couldn't read the notes!")
 
+    # Post the "thinking" placeholder first so we can pass its ts to the
+    # processing Lambda, which edits it in place (chat.update) with the real
+    # answer instead of posting a follow-up message.
+    placeholder_ts = None
+    if channel_id and SLACK_BOT_TOKEN:
+        thinking_text = generate_moogle_thinking_text()
+        logger.info(f"Posting thinking message to channel {channel_id}")
+        placeholder_ts = post_slack_message(channel_id, thinking_text, thread_ts)
+        if placeholder_ts:
+            logger.info("Thinking message posted successfully")
+        else:
+            logger.error("Failed to post thinking message")
+
     # Prepare message for SQS
     message = {
         'request_id': request_id,
@@ -233,6 +246,7 @@ def handler(event, context):
         'is_slash_command': is_slash_command,
         'actor_id': actor_id,
         'session_id': session_id,
+        'placeholder_ts': placeholder_ts,
     }
 
     # Send to SQS
@@ -251,16 +265,6 @@ def handler(event, context):
     except Exception as e:
         logger.error(f"Failed to send message to SQS: {e}")
         raise
-
-    # Post thinking message
-    if channel_id and SLACK_BOT_TOKEN:
-        thinking_text = generate_moogle_thinking_text()
-        logger.info(f"Posting thinking message to channel {channel_id}")
-        result = post_slack_message(channel_id, thinking_text, thread_ts)
-        if result:
-            logger.info("Thinking message posted successfully")
-        else:
-            logger.error("Failed to post thinking message")
 
     # Return response
     if is_slash_command:
@@ -501,7 +505,11 @@ def _format_notes_listing(notes: list) -> str:
 
 
 def post_slack_message(channel_id, text, thread_ts=None):
-    """Post a message to Slack using chat.postMessage API."""
+    """Post a message to Slack using chat.postMessage API.
+
+    Returns the message ts (truthy) on success, None on failure, so callers can
+    later edit the message in place via chat.update.
+    """
     url = 'https://slack.com/api/chat.postMessage'
     headers = {
         'Authorization': f'Bearer {SLACK_BOT_TOKEN}',
@@ -515,13 +523,13 @@ def post_slack_message(channel_id, text, thread_ts=None):
         logger.info(f"Sending POST to Slack chat.postMessage")
         response = requests.post(url, headers=headers, json=data, timeout=5)
         response_data = response.json()
-        
+
         if response_data.get('ok'):
             logger.info("Slack message posted successfully")
-            return True
+            return response_data.get('ts')
         else:
             logger.error(f"Slack API error: {response_data.get('error')}")
-            return False
+            return None
     except Exception as e:
         logger.error(f"Exception posting to Slack: {e}")
-        return False
+        return None

@@ -94,7 +94,8 @@ def handler(event, context):
         thread_ts = None
         is_mention = False
         is_slash_command = False
-        
+        placeholder_ts = None
+
         try:
             # Parse message
             message = json.loads(record['body'])
@@ -110,6 +111,7 @@ def handler(event, context):
             is_slash_command = message.get('is_slash_command', False)
             actor_id = message.get('actor_id', '')
             session_id = message.get('session_id', '')
+            placeholder_ts = message.get('placeholder_ts')
             
             logger.debug(
                 f"Message info - channel_id: {channel_id}, "
@@ -153,19 +155,61 @@ def handler(event, context):
                 logger.error(f"Failed to load notes: {notes_err}")
                 notes_for_context = []
 
+            # The "thinking" placeholder is the single slot for the primary
+            # answer: we edit it in place (chat.update) instead of posting a
+            # follow-up. Interim notices update it without consuming the slot;
+            # the first primary delivery consumes it, and anything after posts
+            # fresh. `_slot` holds the ts until consumed.
+            _slot = {"ts": placeholder_ts}
+
+            def _update_notice(text: str):
+                """Replace the placeholder with an interim notice, keeping the slot."""
+                try:
+                    slack_client.send_response(
+                        channel_id=channel_id,
+                        text=text,
+                        thread_ts=thread_ts,
+                        is_mention=is_mention,
+                        update_ts=_slot["ts"],
+                    )
+                except Exception as notice_err:
+                    logger.error(f"Failed to post interim notice: {notice_err}")
+
+            def _deliver(text: str = None, blocks: list = None, fallback: str = ""):
+                """Deliver a primary message: edit the placeholder once, then post fresh."""
+                ts = _slot["ts"]
+                _slot["ts"] = None  # consume the slot
+                if blocks is not None:
+                    return slack_client.send_blocks(
+                        channel_id=channel_id, blocks=blocks, text=fallback,
+                        thread_ts=thread_ts, is_mention=is_mention, update_ts=ts,
+                    )
+                return slack_client.send_response(
+                    channel_id=channel_id, text=text,
+                    thread_ts=thread_ts, is_mention=is_mention, update_ts=ts,
+                )
+
             # Post an interim "this will take a moment" message if the LLM
             # escalates a complex question to the deep-planning tier.
             def _notify_escalation(goal: str):
-                try:
-                    logger.info(f"Posting escalation notice for goal: {truncate_text(goal)}")
-                    slack_client.send_response(
-                        channel_id=channel_id,
-                        text=_escalation_notice(goal),
-                        thread_ts=thread_ts,
-                        is_mention=is_mention,
-                    )
-                except Exception as notice_err:
-                    logger.error(f"Failed to post escalation notice: {notice_err}")
+                logger.info(f"Posting escalation notice for goal: {truncate_text(goal)}")
+                _update_notice(_escalation_notice(goal))
+
+            # Sustained-dissatisfaction check: if the user has replied negatively
+            # to the bot twice, stop guessing and force a deep-research escalation
+            # to the planner on the original question.
+            forced_goal = None
+            replied_to_bot = any(m.get("role") == "assistant" for m in prior_turns)
+            if (llm_client.escalation_enabled and replied_to_bot
+                    and llm_client.detect_repeated_negativity(messages)):
+                original = _original_goal(prior_turns, question)
+                forced_goal = (
+                    f"{original} — The user is dissatisfied with the earlier "
+                    "answers; research this thoroughly and give a more complete, "
+                    "accurate answer."
+                )
+                logger.info("Repeated negative sentiment — forcing deep-research escalation")
+                _update_notice(_deep_research_notice())
 
             # Generate response via LLM (Claude on Bedrock + tool use)
             logger.info("Calling Bedrock Converse API")
@@ -177,7 +221,8 @@ def handler(event, context):
                     "author_id": actor_id,
                     "channel_id": channel_id,
                 },
-                escalation_notifier=_notify_escalation,
+                escalation_notifier=(None if forced_goal else _notify_escalation),
+                force_planner_goal=forced_goal,
             )
             logger.info(
                 f"Bedrock response received, length: {len(answer)}, "
@@ -190,12 +235,7 @@ def handler(event, context):
                 # the item cards (they'd be redundant supplementary noise here).
                 logger.info("Posting planner answer (escalated)")
                 try:
-                    slack_client.send_response(
-                        channel_id=channel_id,
-                        text=answer,
-                        thread_ts=thread_ts,
-                        is_mention=is_mention,
-                    )
+                    _deliver(text=answer)
                 except Exception as slack_err:
                     logger.error(f"Failed to post planner answer: {slack_err}")
             else:
@@ -208,12 +248,11 @@ def handler(event, context):
                             item_name = item_data.get("name", "Item")
                             logger.info(f"Posting item card for: {item_name}")
                             try:
-                                card_resp = slack_client.send_blocks(
-                                    channel_id=channel_id,
+                                # First card consumes the placeholder slot; the
+                                # rest post as fresh messages.
+                                card_resp = _deliver(
                                     blocks=blocks,
-                                    text=f"Item data: {item_name}",
-                                    thread_ts=thread_ts,
-                                    is_mention=is_mention,
+                                    fallback=f"Item data: {item_name}",
                                 )
                                 # If drops overflow the card, post the full list in a thread on the card
                                 drops = item_data.get("drops", [])
@@ -243,12 +282,7 @@ def handler(event, context):
                 if not any_informative_card:
                     logger.info("Sending response to Slack")
                     try:
-                        slack_client.send_response(
-                            channel_id=channel_id,
-                            text=answer,
-                            thread_ts=thread_ts,
-                            is_mention=is_mention
-                        )
+                        _deliver(text=answer)
                     except Exception as slack_err:
                         logger.error(f"Failed to post flavor text: {slack_err}")
                 else:
@@ -290,7 +324,8 @@ def handler(event, context):
                     slack_client.send_error_message(
                         channel_id=channel_id,
                         thread_ts=thread_ts,
-                        is_mention=is_mention
+                        is_mention=is_mention,
+                        update_ts=placeholder_ts,
                     )
                 except Exception as slack_error:
                     logger.error(f"Failed to post error message: {slack_error}")
@@ -311,6 +346,27 @@ def _escalation_notice(goal: str) -> str:
         f"Ooh, that's a meaty one, kupo! Let me put my full pom-pom power to it "
         f"and work out: _{goal}_\n\nGive me a moment, kupo kupo!"
     )
+
+
+def _deep_research_notice() -> str:
+    """Moogle-voice notice shown when repeated user dissatisfaction forces a
+    deep-research escalation to the planner tier."""
+    return (
+        "Kupo... I can tell my answers haven't hit the mark. Let me stop and do "
+        "some *proper* deep research with my full pom-pom power — give me a "
+        "moment, kupo kupo!"
+    )
+
+
+def _original_goal(prior_turns: list, current: str) -> str:
+    """The user's first question this session — the 'original plan' to re-research.
+
+    Falls back to the current message if no prior user turn is available.
+    """
+    for m in prior_turns:
+        if m.get("role") == "user" and str(m.get("content", "")).strip():
+            return str(m["content"]).strip()
+    return current
 
 
 def _log_operation(request_id, question, channel_id, tool_calls, escalated):

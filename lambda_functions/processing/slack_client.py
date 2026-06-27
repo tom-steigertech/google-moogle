@@ -31,6 +31,7 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
             raise ValueError("Slack bot token is required. Provide it as argument or set SLACK_BOT_TOKEN env var.")
         
         self.api_url = 'https://slack.com/api/chat.postMessage'
+        self.update_url = 'https://slack.com/api/chat.update'
         self.headers = {
             'Authorization': f'Bearer {self.bot_token}',
             'Content-Type': 'application/json'
@@ -96,11 +97,16 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
         }]
 
     def send_response(self, channel_id: str, text: str, thread_ts: str = None,
-                     is_mention: bool = False, timeout: int = 30) -> dict:
+                     is_mention: bool = False, timeout: int = 30,
+                     update_ts: str = None) -> dict:
         """Send a formatted message to Slack as Block Kit blocks.
 
         Converts Markdown in `text` to Slack mrkdwn and splits it into
         section blocks with dividers between named sections.
+
+        When ``update_ts`` is given, the message at that timestamp is edited in
+        place (chat.update) instead of posting a new message — used to replace
+        the "thinking" placeholder with the real answer.
         """
         if not channel_id:
             raise ValueError("channel_id is required")
@@ -120,16 +126,19 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
             thread_ts=thread_ts,
             is_mention=is_mention,
             timeout=timeout,
+            update_ts=update_ts,
         )
-    
+
     def send_blocks(self, channel_id: str, blocks: list, text: str = "",
                     thread_ts: str = None, is_mention: bool = False,
-                    timeout: int = 30) -> dict:
+                    timeout: int = 30, update_ts: str = None) -> dict:
         """Send a Block Kit message to Slack.
 
         Args:
             blocks: Slack Block Kit blocks list
             text: Fallback text for notifications / accessibility
+            update_ts: If set, edit the message at this ts (chat.update) instead
+                       of posting a new one. thread_ts is ignored when updating.
         """
         if not channel_id:
             raise ValueError("channel_id is required")
@@ -139,14 +148,20 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
             'blocks': blocks,
             'text': text,
         }
-        if thread_ts:
+        if update_ts:
+            data['ts'] = update_ts
+        elif thread_ts:
             data['thread_ts'] = thread_ts
 
-        self.logger.debug(f"Sending blocks to channel {channel_id} ({len(blocks)} blocks)")
+        url = self.update_url if update_ts else self.api_url
+        self.logger.debug(
+            f"{'Updating' if update_ts else 'Sending'} blocks to channel "
+            f"{channel_id} ({len(blocks)} blocks)"
+        )
 
         try:
             resp = requests.post(
-                self.api_url,
+                url,
                 headers=self.headers,
                 json=data,
                 timeout=timeout
@@ -374,14 +389,15 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
         return blocks
 
     def send_error_message(self, channel_id: str, thread_ts: str = None,
-                         is_mention: bool = False) -> dict:
+                         is_mention: bool = False, update_ts: str = None) -> dict:
         """Send the standard error message to Slack.
-        
+
         Args:
             channel_id: The Slack channel ID
             thread_ts: Thread timestamp (for threading)
             is_mention: Whether this is a mention response
-            
+            update_ts: If set, replace the placeholder at this ts with the error
+
         Returns:
             The Slack API response as a dict
         """
@@ -389,7 +405,8 @@ The crystal ball is a bit cloudy right now. Please try asking your question agai
             channel_id=channel_id,
             text=self.ERROR_MESSAGE,
             thread_ts=thread_ts,
-            is_mention=is_mention
+            is_mention=is_mention,
+            update_ts=update_ts,
         )
     
     def validate_configuration(self) -> bool:

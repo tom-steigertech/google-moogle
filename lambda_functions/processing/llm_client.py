@@ -28,12 +28,22 @@ from .notes_client import (
 DEFAULT_MODEL_ID = "amazon.nova-lite-v1:0"
 MAX_TOOL_ITERATIONS = 8
 
+# Cheap model for the YES/NO sentiment classification that gates deep-research
+# escalation — no need to spend the front-line model on a one-word answer.
+# Nova Micro has the lowest input price on Bedrock and is built for fast
+# classification. Override with SENTIMENT_MODEL_ID (e.g. amazon.nova-lite-v1:0
+# if Micro mis-triggers on nuance/sarcasm).
+DEFAULT_SENTIMENT_MODEL_ID = "amazon.nova-micro-v1:0"
+
 # Deep-planning tier. Complex, multi-step questions (cross-referencing several
 # facts, arithmetic over looked-up values, dependent lookup chains) are escalated
 # from the front-line model to this more capable model, which gets a planning
 # system prompt and a larger tool-iteration budget.
 DEFAULT_PLANNER_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
-MAX_PLANNER_ITERATIONS = 15
+# 15 tool-using passes + 1 final synthesis pass (the last iteration is nudged to
+# answer without tools), so the planner can run up to 15 tool calls for a more
+# comprehensive set of searches and synthesis.
+MAX_PLANNER_ITERATIONS = 16
 
 # Returned when the model never stops calling tools (extremely rare) so the user
 # gets a friendly reply instead of a hard error.
@@ -421,11 +431,14 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
 
     def __init__(self, model_id: str = None, region_name: str = None,
                  log_level: str = "ERROR", system_prompt: str = None,
-                 planner_model_id: str = None):
+                 planner_model_id: str = None, sentiment_model_id: str = None):
         self.model_id = model_id or os.environ.get("BEDROCK_MODEL_ID", DEFAULT_MODEL_ID)
         self.planner_model_id = (planner_model_id
                                  or os.environ.get("PLANNER_MODEL_ID")
                                  or DEFAULT_PLANNER_MODEL_ID)
+        self.sentiment_model_id = (sentiment_model_id
+                                   or os.environ.get("SENTIMENT_MODEL_ID")
+                                   or DEFAULT_SENTIMENT_MODEL_ID)
         # Kill-switch for the more expensive planner tier. When disabled, the
         # escalate_to_planner tool is never offered, so every question is answered
         # by the front-line model only. Toggled via the ENABLE_PLANNER_ESCALATION
@@ -463,7 +476,8 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
     def generate_response(self, messages: list, max_tokens: int = 1000,
                           temperature: float = 0.7, notes: list = None,
                           note_context: dict = None,
-                          escalation_notifier=None) -> tuple:
+                          escalation_notifier=None,
+                          force_planner_goal: str = None) -> tuple:
         """Generate a Moogle response via the Bedrock Converse API.
 
         Args:
@@ -478,6 +492,12 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
                           front-line model escalates a complex question to the
                           planner tier. The caller uses it to post an interim
                           "this will take a moment" message to the user.
+            force_planner_goal: When set, skip the front-line tier entirely and
+                          send this goal straight to the planner. Used when the
+                          caller has already decided a deep-research escalation is
+                          warranted (e.g. repeated user dissatisfaction). The
+                          escalation_notifier is NOT called in this case — the
+                          caller is expected to post its own notice first.
 
         Returns:
             (text, item_lookups, escalated) where item_lookups is a list of dicts
@@ -511,6 +531,19 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
         if notes_section:
             system_text = f"{system_text}\n\n{notes_section}"
 
+        # Caller-forced deep-research escalation: skip the front-line tier and
+        # hand the goal straight to the planner.
+        if force_planner_goal:
+            self.logger.info(f"Forced planner escalation: {force_planner_goal!r}")
+            self.last_tool_calls.append({
+                "name": "escalate_to_planner",
+                "input": _summarize_tool_input({"goal": force_planner_goal}),
+            })
+            text, items = self._run_planner_tier(
+                messages, force_planner_goal, system_text, max_tokens, temperature
+            )
+            return text, items, True
+
         # Force a tool call on the first iteration when the question looks like an
         # item query.  Smaller models tend to skip the tool with long history.
         force_tool_first = _looks_like_item_query(str(last_user))
@@ -535,7 +568,6 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
             return text, item_lookups, False
 
         # --- Planner tier: a more capable model with a planning prompt. ---
-        self.logger.info(f"Escalating to planner ({self.planner_model_id}): {escalate_goal!r}")
         self.last_tool_calls.append(
             {"name": "escalate_to_planner", "input": _summarize_tool_input({"goal": escalate_goal})}
         )
@@ -545,6 +577,20 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
             except Exception as e:
                 self.logger.error(f"escalation_notifier failed: {e}", exc_info=True)
 
+        planner_text, planner_items = self._run_planner_tier(
+            messages, escalate_goal, system_text, max_tokens, temperature
+        )
+        return planner_text, planner_items, True
+
+    def _run_planner_tier(self, messages: list, goal: str, system_text: str,
+                          max_tokens: int, temperature: float) -> tuple:
+        """Run the deep-planning tier on the full conversation for ``goal``.
+
+        A more capable model with the planning addendum and a larger tool budget
+        (MAX_PLANNER_ITERATIONS). Returns (text, item_lookups). The planner does
+        not get the escalate_to_planner tool — it is the escalation target.
+        """
+        self.logger.info(f"Escalating to planner ({self.planner_model_id}): {goal!r}")
         planner_system = f"{system_text}{self.PLANNER_ADDENDUM}"
         # Run the planner on the full conversation plus an explicit planning brief
         # so it has both context and a crisp restatement of the goal.
@@ -558,7 +604,7 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
         planner_messages.append({
             "role": "user",
             "content": [{"text": (
-                f"Please work out this goal carefully: {escalate_goal}"
+                f"Please work out this goal carefully: {goal}"
             )}],
         })
         planner_text, planner_items, _ = self._run_tool_loop(
@@ -571,7 +617,44 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
             include_escalate=False,
             force_first=False,
         )
-        return planner_text, planner_items, True
+        return planner_text, planner_items
+
+    def detect_repeated_negativity(self, messages: list) -> bool:
+        """True if the user has voiced dissatisfaction with the bot's answers
+        on two or more separate messages this conversation.
+
+        One cheap classification call on a low-cost model (self.sentiment_model_id,
+        default Nova-Lite; no tools, tiny token budget). Used to decide whether to
+        force a deep-research escalation. Best-effort: any error returns False so a
+        classifier hiccup never changes the answer path.
+        """
+        user_turns = [m for m in messages if m.get("role") == "user"]
+        if len(user_turns) < 2:
+            return False  # can't be "twice" with fewer than two user messages
+
+        transcript = _format_transcript(messages)
+        prompt = (
+            "Here is a conversation between a user and an assistant:\n\n"
+            f"{transcript}\n\n"
+            "Has the USER expressed clear negative sentiment or dissatisfaction "
+            "with the assistant's answers on TWO OR MORE separate user messages? "
+            "Consider replies like 'that's wrong', 'still not helpful', 'no', "
+            "'that's not what I asked'. Answer with exactly one word: YES or NO."
+        )
+        try:
+            resp = self.client.converse(
+                modelId=self.sentiment_model_id,
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                inferenceConfig={"maxTokens": 5, "temperature": 0},
+            )
+            verdict = _extract_text(
+                resp["output"]["message"].get("content", [])
+            ).strip().upper()
+            self.logger.info(f"Repeated-negativity verdict: {verdict!r}")
+            return verdict.startswith("YES")
+        except Exception as e:
+            self.logger.error(f"Sentiment detection failed: {e}", exc_info=True)
+            return False
 
     def _run_tool_loop(self, converse_messages: list, system_text: str,
                        model_id: str, max_iters: int, max_tokens: int,
@@ -885,6 +968,18 @@ _ITEM_QUERY_PATTERNS = re.compile(
 def _looks_like_item_query(text: str) -> bool:
     """Return True if the text looks like a question about a specific FFXI item."""
     return bool(_ITEM_QUERY_PATTERNS.search(text))
+
+
+def _format_transcript(messages: list, limit: int = 12) -> str:
+    """Render the most recent turns as 'Role: text' lines for a classifier prompt."""
+    lines = []
+    for m in messages[-limit:]:
+        role = "User" if m.get("role") == "user" else "Assistant"
+        content = m.get("content", "")
+        if isinstance(content, list):
+            content = _extract_text(content)
+        lines.append(f"{role}: {str(content).strip()}")
+    return "\n".join(lines)
 
 
 def _summarize_tool_input(tool_input: dict) -> str:
