@@ -1,0 +1,94 @@
+Category,NPC_Name,Zone,Coordinates,Description,Destinations
+Chocobo,Camereine,Southern San d'Oria,(I-11),Chocobo Renter at Chocobo Stables,Rents chocobo for exploring West/East Ronfaure & Jugner
+Chocobo,Emoussinc,Southern San d'Oria,(I-11),Chocobo Renter at Chocobo Stables,Rents chocobo for exploring West/East Ronfaure & Jugner
+Chocobo,Meuneille,Southern San d'Oria,(I-11),Chocobo Renter at Chocobo Stables,Rents chocobo for exploring West/East Ronfaure & Jugner
+Chocobo,Kuoh Rhel,Windurst Woods,(G-8),Chocobo attendant at Chocobo Stables,Rents chocobo for exploring East/West Sarutabaruta
+Chocobo,Bin Stejihna,Windurst Woods,(G-8),Chocobo Renter (Mithra) at Chocobo Stables,Rents chocobo for exploring East/West Sarutabaruta
+Chocobo,Chocobo Renter,Bastok Mines,(I-9),Chocobo Renter at Chocobo Stables,Rents chocobo for exploring North/South Gustaberg
+Chocobo,Chocobo Renter,Port Jeuno,(I-9),Chocobo Renter at Port Jeuno Chocobo Alley,Rents chocobo for exploring Batallia Downs / Rolanberry / Sauromugue
+Chocobo,Chocobo Renter,Upper Jeuno,(F-6),Chocobo Renter at Chocobo Stables (Upper),Rents chocobo for exploring surrounding areas
+Chocobo,Chocobo Renter,Lower Jeuno,(H-8),Chocobo Renter at Chocobo Alley,Rents chocobo for exploring surrounding areas
+Chocobo,Finbarr,Upper Jeuno,(G-7),Chocobo mating / egg NPC at Chocobo Stables,Chocobo Raising services
+Chocobo,Guinavie,Rabao,(G-10),Chocobo Renter,Rents chocobo for Western Altepa Desert
+Chocobo,Marilleune,Norg,(H-9),Chocobo Renter,Rents chocobo for Sea Serpent Grotto entry area
+Chocobo,Fyi Chalmwoh,Kazham,(G-7),Chocobo Renter (Mithra) near Yuhtunga Jungle zone,Rents chocobo for Yuhtunga / Yhoator Jungle
+Chocobo,Dahaaba,Al Zahbi,(G-9),Chocobo Renter (Aht Urhgan region),Rents chocobo for Wajaom / Bhaflau areas
+Chocobo,Chocobo Tamer,Abyssea - Attohwa,(F-8),Chocobo Tamer NPC (Cruor merchant),Chocobo rental / Cruor-based chocobo services
+Chocobo,Chocobo Tamer,Abyssea - Vunkerl,(I-9),Chocobo Tamer NPC (Cruor merchant),Chocobo rental / Cruor-based chocobo services
+Chocobo,Chocobo Tamer,Abyssea - Misareaux,(I-7),Chocobo Tamer NPC (Cruor merchant),Chocobo rental / Cruor-based chocobo services
+Airship,Airship Attendant,Port Jeuno,(I-8),Attendant at San d'Oria gate in Port Jeuno airship dock,San d'Oria (Port San d'Oria)
+Airship,Airship Attendant,Port Jeuno,(I-9),Attendant at Bastok gate in Port Jeuno airship dock,Bastok (Port Bastok)
+Airship,Airship Attendant,Port Jeuno,(H-9),Attendant at Windurst gate in Port Jeuno airship dock,Windurst (Port Windurst)
+Airship,Airship Attendant,Port Jeuno,(H-8),Attendant at Kazham gate in Port Jeuno airship dock,Kazham
+Airship,Guddal,Port Jeuno,(I-8),Sells Airship Pass for Kazham for 148000 gil or via quest,Kazham
+Airship,Airship Attendant,Port San d'Oria,(H-8),Attendant at Air Travel Agency (San d'Oria),Port Jeuno
+Airship,Airship Attendant,Port Bastok,(F-7),Attendant at Air Travel Agency (Bastok),Port Jeuno
+Airship,Airship Attendant,Port Windurst,(H-6),Attendant at Air Travel Agency (Windurst),Port Jeuno
+Airship,Airship Attendant,Kazham,(J-9),Attendant at Kazham airship pad,Port Jeuno
+Airship,Sealion's Den Gate NPC,Ru'Lude Gardens,(H-5),NPC controlling Sealion's Den (Empress) airship access via mission,Sealion's Den (Sea entry / CoP)
+Outpost Warp,Jeanvirgaud,Northern San d'Oria,(L-10),Conquest Overseer / OP Warp NPC (San d'Oria),Warps to any unlocked OP for San d'Oria adventurers
+Outpost Warp,Conrad,Bastok Mines,(K-8),Conquest Overseer / OP Warp NPC (Bastok),Warps to any unlocked OP for Bastok adventurers
+Outpost Warp,Rottata,Port Windurst,(L-4),Conquest Overseer / OP Warp NPC (Windurst),Warps to any unlocked OP for Windurst adventurers
+Outpost Warp,Ranger (Ronfaure OP),West Ronfaure,(G-9),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Ronfaure Outpost
+Outpost Warp,Ranger (Zulkheim OP),Valkurm Dunes,(H-7),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Zulkheim Outpost
+Outpost Warp,Ranger (Norvallen OP),Jugner Forest,(I-8),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Norvallen Outpost
+Outpost Warp,Ranger (Gustaberg OP),North Gustaberg,(D-10),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Gustaberg Outpost
+Outpost Warp,Ranger (Derfland OP),Pashhow Marshlands,(F-11),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Derfland Outpost
+Outpost Warp,Ranger (Sarutabaruta OP),West Sarutabaruta,(H-6),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Sarutabaruta Outpost
+Outpost Warp,Ranger (Kolshushu OP),Buburimu Peninsula,(D-6),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Kolshushu Outpost
+Outpost Warp,Ranger (Aragoneu OP),Meriphataud Mountains,(E-5),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Aragoneu Outpost
+Outpost Warp,Ranger (Fauregandi OP),Beaucedine Glacier,(H-9),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Fauregandi Outpost
+Outpost Warp,Ranger (Valdeaunia OP),Xarcabard,(F-4),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Valdeaunia Outpost
+Outpost Warp,Ranger (Qufim OP),Qufim Island,(H-6),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Qufim Outpost
+Outpost Warp,Ranger (Li'Telor OP),Xarcabard / Beaucedine border,(various),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Li'Telor Outpost
+Outpost Warp,Ranger (Kuzotz OP),Western Altepa Desert,(J-7),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Kuzotz Outpost
+Outpost Warp,Ranger (Elshimo Lowlands OP),Yuhtunga Jungle,(H-7),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Elshimo Lowlands Outpost
+Outpost Warp,Ranger (Elshimo Uplands OP),Yhoator Jungle,(G-9),Outpost NPC (Ranger) accepts tag/return,Return to home nation from Elshimo Uplands Outpost
+Runic Portal,Sharin-Garin,Aht Urhgan Whitegate,(L-8),Male Tarutaru; sells Runic Portal Use Permits for 200 Imperial Standing; info about Chamber of Passage,Access to Runic Portal system in Chamber of Passage
+Runic Portal,Runic Portal (Chamber of Passage),Aht Urhgan Whitegate,(K-9),Runic Portal doorway to any unlocked Staging Point,Leujaoam Sanctum / Mamool Ja Staging Point / Halvung / Lebros Cavern / Periqia / Ilrusi Atoll / Nyzul Isle Staging Point
+Runic Portal,Runic Portal (Return),Leujaoam Sanctum,(various),Return Runic Portal,Aht Urhgan Whitegate
+Runic Portal,Runic Portal (Return),Mamool Ja Staging Point,(various),Return Runic Portal,Aht Urhgan Whitegate
+Runic Portal,Runic Portal (Return),Lebros Cavern,(various),Return Runic Portal,Aht Urhgan Whitegate
+Runic Portal,Runic Portal (Return),Periqia,(various),Return Runic Portal,Aht Urhgan Whitegate
+Runic Portal,Runic Portal (Return),Ilrusi Atoll,(various),Return Runic Portal,Aht Urhgan Whitegate
+Runic Portal,Runic Portal (Return),Nyzul Isle Staging Point,(various),Return Runic Portal,Aht Urhgan Whitegate
+Ferry,Bhoyu Halpatacco,Selbina,(I-10),Ferry Ticket Vendor,Sells Ferry Ticket (100 gil) for Selbina<->Mhaura ferry
+Ferry,Lucia,Mhaura,(I-9),Ferry Ticket Vendor,Sells Ferry Ticket (100 gil) for Selbina<->Mhaura and Mhaura<->Al Zahbi ferries
+Ferry,Felisa,Aht Urhgan Whitegate,(H-11),Ferry Ticket Vendor,Sells Ferry Ticket (100 gil) for Mhaura<->Al Zahbi and Al Zahbi<->Nashmau ferries
+Ferry,Ferry Ticket Vendor,Kazham,(G-7),Ferry Ticket Vendor,Sells Ferry Ticket (200 gil) for Selbina<->Mhaura
+Ferry,Ferry Attendant,Selbina,(H-9),Ferry Attendant at Selbina docks,Boards ferry bound for Mhaura
+Ferry,Ferry Attendant,Mhaura,(J-9),Ferry Attendant at Mhaura docks,Boards ferry bound for Selbina / Al Zahbi
+Ferry,Ferry Attendant,Aht Urhgan Whitegate,(H-11),Ferry Attendant at Al Zahbi/Whitegate docks,Boards ferry bound for Mhaura / Nashmau
+Ferry,Ferry Attendant,Nashmau,(H-8),Ferry Attendant at Nashmau docks,Boards ferry bound for Al Zahbi
+Manaclipper,Tswe Panipahr,Bibiki Bay (Sunset Docks),(H-7),Manaclipper Ticket vendor (single 80 gil / multi 500 gil = 10 rides),Manaclipper: Bibiki Bay <-> Selbina <-> Mhaura
+Manaclipper,Manaclipper Attendant,Selbina,(J-9),Manaclipper Attendant at Selbina dock,Boards Manaclipper to Bibiki Bay / Mhaura
+Manaclipper,Manaclipper Attendant,Mhaura,(H-8),Manaclipper Attendant at Mhaura dock,Boards Manaclipper to Bibiki Bay / Selbina
+Manaclipper,Manaclipper Attendant,Bibiki Bay,(H-7),Manaclipper Attendant at Sunset Docks,Boards Manaclipper to Selbina / Mhaura
+Warp Taxi,Kaduru-Haiduru,Aht Urhgan Whitegate,(G-10),Trades Imperial Silver Piece for warp; after 3 trades also unlocks home-nation warp,Ru'Lude Gardens (and home nation after 3 trades)
+Warp Taxi,Shami,Nashmau,(G-8),Warp-taxi NPC near docks / Home Point,Warps to Al Zahbi (Aht Urhgan)
+Warp Taxi,Kayeel-Payeel,Aht Urhgan Whitegate,(various),Warp NPC (Chamber of Passage area),Warp assistance within Aht Urhgan
+Warp Taxi,Shihu-Danhu,Aht Urhgan Whitegate,(H-9),Warp / assistance NPC,Whitegate-area warp
+Warp Taxi,Warp Taxi NPC,Kazham,(G-9),Warp-taxi NPC near Yuhtunga zone,Warp assistance in Kazham
+Cavernous Maw,Cavernous Maws (NPC),East Ronfaure,(H-5),Time-travel maw NPC (present<->past),East Ronfaure [S] / present
+Cavernous Maw,Cavernous Maws (NPC),North Gustaberg,(K-7),Time-travel maw NPC (present<->past),North Gustaberg [S] / present
+Cavernous Maw,Cavernous Maws (NPC),West Sarutabaruta,(H-9),Time-travel maw NPC (present<->past),West Sarutabaruta [S] / present
+Cavernous Maw,Cavernous Maws (NPC),Jugner Forest,(H-11),Time-travel maw NPC (present<->past),Jugner Forest [S] / present
+Cavernous Maw,Cavernous Maws (NPC),Pashhow Marshlands,(K-8),Time-travel maw NPC (present<->past),Pashhow Marshlands [S] / present
+Cavernous Maw,Cavernous Maws (NPC),Meriphataud Mountains,(K-6),Time-travel maw NPC (present<->past),Meriphataud Mountains [S] / present
+Cavernous Maw,Cavernous Maws (NPC),Batallia Downs,(H-5),Time-travel maw NPC (Cavernous Maws mission entry),Batallia Downs [S] / present
+Cavernous Maw,Cavernous Maws (NPC),Rolanberry Fields,(H-6),Time-travel maw NPC (Cavernous Maws mission entry),Rolanberry Fields [S] / present
+Cavernous Maw,Cavernous Maws (NPC),Sauromugue Champaign,(K-9),Time-travel maw NPC (Cavernous Maws mission entry),Sauromugue Champaign [S] / present
+Cavernous Maw,Cavernous Maws (NPC),Abyssea - Vunkerl,(F-4),Return maw from Abyssea,Vunkerl Inlet [S]
+Cavernous Maw,Cavernous Maws (NPC),Abyssea - Altepa,(K-5),Return maw from Abyssea,Western Altepa Desert [S]
+Cavernous Maw,Cavernous Maws (NPC),Abyssea - Uleguerand,(G-11),Return maw from Abyssea,Uleguerand Range [S]
+Cavernous Maw,Cavernous Maws (NPC),Abyssea - Grauberg,(F-14),Return maw from Abyssea,Grauberg [S]
+Nomad Moogle,Nomad Moogle,Ru'Lude Gardens,(H-5),Job change / Mog House / Delivery access - services only,No warp (services-only Nomad Moogle)
+Nomad Moogle,Nomad Moogle,Selbina,(I-9),Full Nomad Moogle (jobs / mog house / delivery),Mog House access from Selbina
+Nomad Moogle,Nomad Moogle,Mhaura,(H-8),Full Nomad Moogle (upper level),Mog House access from Mhaura
+Nomad Moogle,Nomad Moogle,Kazham,(H-9),Full Nomad Moogle,Mog House access from Kazham
+Nomad Moogle,Nomad Moogle,Rabao,(G-8),Full Nomad Moogle,Mog House access from Rabao
+Nomad Moogle,Nomad Moogle,Norg,(G-7),Full Nomad Moogle,Mog House access from Norg
+Nomad Moogle,Nomad Moogle,Tavnazian Safehold,(F-8),Full Nomad Moogle,Mog House access from Tavnazian Safehold
+Nomad Moogle,Nomad Moogle,Nashmau,(G-6),Full Nomad Moogle,Mog House access from Nashmau
+Waypoint,Jausephiane,Western Adoulin - Couriers' Coalition,(G-7),Sells Warp Rune Key Items for 100 Bayld each (after Coalition Flag edification),Various Waypoint destinations in Ulbuka
+Reive,Dimmian,Eastern Adoulin,(E-6),Provides Habitual Behavior Barometer / sells one-time Wildskeeper Reive keys,Access to Wildskeeper Reives across Ulbuka

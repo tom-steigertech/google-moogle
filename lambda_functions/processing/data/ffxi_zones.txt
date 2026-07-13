@@ -1,0 +1,277 @@
+Abyssea - Altepa
+Abyssea - Attohwa
+Abyssea - Empyreal Paradox
+Abyssea - Grauberg
+Abyssea - Konschtat
+Abyssea - La Theine
+Abyssea - Misareaux
+Abyssea - Tahrongi
+Abyssea - Uleguerand
+Abyssea - Vunkerl
+Aht Urhgan Whitegate
+Airship, Jeuno - Bastok
+Airship, Jeuno - Kazham
+Airship, Jeuno - San d'Oria
+Airship, Jeuno - Windurst
+Al Zahbi
+Al'Taieu
+Altar Room
+Alzadaal Undersea Ruins
+Areas
+Arrapago Reef
+Attohwa Chasm
+Auction House
+Aydeewa Subterrane
+Azouph Isle Staging Point
+Balga's Dais
+Bastok Markets
+Bastok Markets (S)
+Bastok Mines
+Batallia Downs
+Batallia Downs (S)
+Beadeaux
+Beadeaux (S)
+Bearclaw Pinnacle
+Beaucedine Glacier
+Beaucedine Glacier (S)
+Behemoth's Dominion
+Bhaflau Thickets
+Bibiki Bay
+Bibiki Bay - Purgonorgo Isle
+Boneyard Gully
+Bostaunieux Oubliette
+Buburimu Peninsula
+Caedarva Mire
+Cape Teriggan
+Carpenters' Landing
+Castle Oztroja
+Castle Oztroja (S)
+Castle Zvahl Baileys
+Castle Zvahl Baileys (S)
+Castle Zvahl Keep
+Castle Zvahl Keep (S)
+Ceizak Battlegrounds
+Celennia Memorial Library
+Celestial Nexus
+Chamber of Oracles
+Chateau d'Oraguille
+Chocobo Circuit
+Cirdas Caverns
+Cirdas Caverns (U)
+Cloister of Flames
+Cloister of Frost
+Cloister of Gales
+Cloister of Storms
+Cloister of Tides
+Cloister of Tremors
+Crawlers' Nest
+Crawlers' Nest (S)
+Dangruf Wadi
+Davoi
+Den of Rancor
+Desuetia - Empyreal Paradox
+Dho Gates
+Diorama - Ghelsba Outpost
+Diorama - Purgonorgo Isle
+Diorama Abdhaljs-Ghelsba
+Dragon's Aery
+Dvucca Isle Staging Point
+Dynamis - Bastok
+Dynamis - Bastok (D)
+Dynamis - Beaucedine
+Dynamis - Buburimu
+Dynamis - Jeuno
+Dynamis - Jeuno (D)
+Dynamis - Qufim
+Dynamis - San d'Oria
+Dynamis - San d'Oria (D)
+Dynamis - Tavnazia
+Dynamis - Valkurm
+Dynamis - Windurst
+Dynamis - Windurst (D)
+Dynamis - Xarcabard
+East Ronfaure
+East Ronfaure (S)
+East Sarutabaruta
+Eastern Adoulin
+Eastern Altepa Desert
+Empyreal Paradox
+Escha - Ru'Aun
+Escha - Zi'Tah
+Eternal Ice
+Everbloom Hollow
+Fei'Yin
+Feretory
+Foret de Hennetiel
+Fort Ghelsba
+Fort Karugo-Narugo (S)
+Full Moon Fountain
+Garlaige Citadel
+Garlaige Citadel (S)
+Ghelsba Outpost
+Ghoyu's Reverie
+Giddeus
+Grand Palace of Hu'Xzoi
+Grauberg (S)
+Gusgen Mines
+Gustav Tunnel
+Hall of Transference
+Hall of Transference, Dem
+Hall of Transference, Holla
+Hall of Transference, Mea
+Hall of the Gods
+Halvung
+Hazhalm Testing Grounds
+Heavens Tower
+Horlais Peak
+Ifrit's Cauldron
+Inner Horutoto Ruins
+Jade Sepulcher
+Jugner Forest
+Jugner Forest (S)
+Kamihr Drifts
+Kazham
+King Ranperre's Tomb
+Konschtat Highlands
+Korroloka Tunnel
+Kuftal Tunnel
+La Theine Plateau
+La Vaule (S)
+La'Loff Amphitheater
+Labyrinth of Onzozo
+Leafallia
+Lower Delkfutt's Tower
+Lower Jeuno
+Lufaise Meadows
+Mamook
+Manaclipper
+Maquette Abdhaljs-Legion
+Marjami Ravine
+Maze of Shakhrami
+Meriphataud Mountains
+Meriphataud Mountains (S)
+Metalworks
+Mhaura
+Middle Delkfutt's Tower
+Mine Shaft 2716
+Misareaux Coast
+Moh Gates
+Monarch Linn
+Monastic Cavern
+Mordion Gaol
+Morimar Basalt Fields
+Mount Kamihr
+Mount Zhayolm
+Nashmau
+Navukgo Execution Chamber
+Newton Movalpolos
+Norg
+North Gustaberg
+North Gustaberg (S)
+Northern San d'Oria
+Nyzul Isle
+Oldton Movalpolos
+Ordelle's Caves
+Outer Horutoto Ruins
+Outer Ra'Kaznar
+Outer Ra'Kaznar (U)
+Palborough Mines
+Pashhow Marshlands
+Pashhow Marshlands (S)
+Phanauet Channel
+Phomiuna Aqueducts
+Port Bastok
+Port Jeuno
+Port San d'Oria
+Port Windurst
+Promyvion
+Promyvion - Dem
+Promyvion - Holla
+Promyvion - Mea
+Promyvion - Vahzl
+Provenance
+Pso'Xja
+Qu'Bia Arena
+Qufim Island
+Quicksand Caves
+Qulun Dome
+Ra'Kaznar Inner Court
+Ra'Kaznar Turris
+Rabao
+Rala Waterways
+Rala Waterways (U)
+Ranguemont Pass
+Reisenjima
+Reisenjima Henge
+Reisenjima Sanctorium
+Rhapsodies of Vana'diel Areas
+Riverne - Site A01
+Riverne - Site B01
+Ro'Maeve
+Rolanberry Fields
+Rolanberry Fields (S)
+Ru'Aun Gardens
+Ru'Lude Gardens
+Ruhotz Silvermines
+Sacrarium
+Sacrificial Chamber
+Sauromugue Champaign
+Sauromugue Champaign (S)
+Sea Serpent Grotto
+Sealion's Den
+Selbina
+Sih Gates
+Silver Knife
+South Gustaberg
+Southern San d'Oria
+Southern San d'Oria (S)
+Spire of Dem
+Spire of Holla
+Spire of Mea
+Spire of Vahzl
+Stellar Fulcrum
+Tahrongi Canyon
+Talacca Cove
+Tavnazian Safehold
+Temple of Uggalepih
+The Ashu Talif
+The Boyahda Tree
+The Colosseum
+The Eldieme Necropolis
+The Eldieme Necropolis (S)
+The Garden of Ru'Hmet
+The Sanctuary of Zi'Tah
+The Shrine of Ru'Avitau
+The Shrouded Maw
+Throne Room
+Throne Room (S)
+Toraimarai Canal
+Uleguerand Range
+Upper Delkfutt's Tower
+Upper Jeuno
+Valkurm Dunes
+Valley of Sorrows
+Ve'Lugannon Palace
+Vunkerl Inlet (S)
+Wajaom Woodlands
+Walk of Echoes
+Waughroon Shrine
+West Ronfaure
+West Sarutabaruta
+West Sarutabaruta (S)
+Western Adoulin
+Western Altepa Desert
+Windurst Walls
+Windurst Waters
+Windurst Waters (S)
+Windurst Woods
+Woh Gates
+Xarcabard
+Xarcabard (S)
+Yahse Hunting Grounds
+Yhoator Jungle
+Yorcia Weald
+Yorcia Weald (U)
+Yughott Grotto
+Yuhtunga Jungle
+Zeruhn Mines

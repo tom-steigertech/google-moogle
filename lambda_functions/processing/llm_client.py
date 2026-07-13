@@ -14,8 +14,10 @@ import boto3
 
 from .ffxi_item_lookup import lookup_as_tool_result
 from .ffxi_reddit_search import search_as_tool_result as reddit_search
+from .ffxi_travel_lookup import lookup_as_tool_result as travel_lookup
 from .ffxi_wiki_search import search_as_tool_result as wiki_search
 from .ffxi_zone_map import fetch_zone_maps
+from .ffxi_zones import resolve_zone
 from .ffxiah_lookup import lookup_as_tool_result as ffxiah_lookup
 from .ffxidb_lookup import lookup_as_tool_result as ffxidb_lookup
 from .notes_client import (
@@ -254,6 +256,98 @@ FFXI_ZONE_MAP_TOOL = {
     }
 }
 
+FFXI_TRAVEL_LOOKUP_TOOL = {
+    "toolSpec": {
+        "name": "ffxi_travel_lookup",
+        "description": (
+            "Look up the exact in-game locations of Final Fantasy XI travel and "
+            "warp resources from a curated, authoritative dataset — MORE reliable "
+            "than web search for this. Covers three things: (1) HOME POINTS (the "
+            "teleport-restore crystals in most zones), (2) SURVIVAL GUIDES (the "
+            "free warp/teleport books placed around the world), and (3) TRAVEL "
+            "NPCs — chocobo renters, airship attendants, Outpost Warp overseers, "
+            "Runic Portals, ferries, Manaclippers, Cavernous Maws, Nomad Moogles, "
+            "warp taxis, and waypoints. Each result includes the zone, map "
+            "coordinates, and a description. "
+            "Use `zone` to ask what travel resources are located IN a zone (e.g. "
+            "'where are the Home Points in Bastok Mines', 'is there a Survival "
+            "Guide in Aht Urhgan Whitegate'). Use `destination` to ask which NPC "
+            "gets a player TO a place (e.g. 'how do I get to Kazham', 'what warps "
+            "to Nyzul Isle'). You may pass both. Prefer this tool over web/wiki "
+            "search for any Home Point, Survival Guide, or warp/transport-NPC "
+            "location question."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "zone": {
+                        "type": "string",
+                        "description": (
+                            "The zone to find travel resources IN, e.g. 'Bastok "
+                            "Mines', 'Aht Urhgan Whitegate', 'Southern San d'Oria'. "
+                            "Fuzzy-matched, so minor spelling differences are fine."
+                        ),
+                    },
+                    "resource_type": {
+                        "type": "string",
+                        "enum": ["all", "home_point", "survival_guide", "travel_npc"],
+                        "description": (
+                            "Which kind of resource to return for `zone`. Default "
+                            "'all'. Use 'home_point', 'survival_guide', or "
+                            "'travel_npc' to narrow when the user asks about only "
+                            "one kind. Ignored for a pure `destination` query."
+                        ),
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": (
+                            "A place the player wants to travel TO; returns the "
+                            "travel NPCs (chocobos, airships, portals, ferries, "
+                            "maws, etc.) that go there, e.g. 'Kazham', 'Nyzul "
+                            "Isle', 'Al Zahbi'."
+                        ),
+                    },
+                },
+            }
+        },
+    }
+}
+
+FFXI_ZONE_RESOLVE_TOOL = {
+    "toolSpec": {
+        "name": "ffxi_zone_resolve",
+        "description": (
+            "Correct and confirm the spelling of a Final Fantasy XI zone name "
+            "against the authoritative list of all ~277 in-game zones. Call this "
+            "FIRST whenever the user names a zone that looks misspelled, abbreviated, "
+            "or that you are not certain is spelled exactly as in-game (e.g. "
+            "'Batalia Downs', 'Whitgate', 'sandoria', 'Rolanberry Feilds') — before "
+            "you answer or call ffxi_zone_map / ffxi_wiki_search with it. Returns the "
+            "canonical spelling ('match'), whether it was an exact hit, whether it was "
+            "corrected, a confidence flag ('high_confidence'), and up to 5 'suggestions'. "
+            "If high_confidence is true, use 'match' as the correct zone name. If it is "
+            "false but suggestions exist, ask the user which zone they meant. If there is "
+            "no match and no suggestions, the name is not a known FFXI zone."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "zone": {
+                        "type": "string",
+                        "description": (
+                            "The zone name as the user wrote it, however they spelled "
+                            "it, e.g. 'Batalia Downs', 'Qufim Iland', 'Aht Urhgan Whitgate'."
+                        ),
+                    }
+                },
+                "required": ["zone"],
+            }
+        },
+    }
+}
+
 FFXI_REDDIT_SEARCH_TOOL = {
     "toolSpec": {
         "name": "ffxi_reddit_search",
@@ -403,9 +497,13 @@ You have the tools below — always prefer them over answering from memory:
 
 7. ffxi_zone_map: Fetch the zone map image(s) and BG-Wiki page text when the user asks about zone layout, navigation within a zone, or how to move between areas or sub-maps. The tool returns both the page text and the map images — read both carefully. Answer ONLY from what the page text and maps show; never blend in knowledge about surrounding zones. For multi-map zones, the sub-maps are all part of the same zone — transitions between them appear as passages or exits on the map images, not as zone lines to other zones.
 
-8. ffxi_reddit_search: LAST RESORT ONLY. Search the r/ffxi subreddit for community discussion. Use this ONLY after ffxi_wiki_search and search_notes have failed to answer, OR for inherently opinion/experience-based questions a wiki cannot cover (e.g. "what's the best solo job", "is this content still worth doing", subjective recommendations). The results are unverified player posts and opinions, NOT authoritative facts — never prefer Reddit over the wiki, and when you do use it, make clear you're relaying community opinion from r/ffxi rather than confirmed fact.
+8. ffxi_travel_lookup: Use for questions about the locations of Home Points, Survival Guides, and warp/transport NPCs (chocobo renters, airship attendants, Outpost Warp overseers, Runic Portals, ferries, Manaclippers, Cavernous Maws, Nomad Moogles, warp taxis, waypoints). This is authoritative curated data — PREFER it over ffxi_wiki_search or your own memory for these location questions. Pass `zone` to list what travel resources are IN a zone (optionally narrow with resource_type = home_point / survival_guide / travel_npc), and/or `destination` to find which NPC gets a player TO a place. Relay the zone, coordinates, and description in your answer (no card is posted). If the zone isn't found, the result may include "zone_suggestions" — offer those in Moogle voice.
 
-9. escalate_to_planner: Use for COMPLEX, multi-step questions that a single lookup can't answer — ones that need cross-referencing several facts, arithmetic over looked-up values, or a chain of dependent lookups (e.g. "how many X fights for enough Y to finish the Z upgrade", "cheapest way to skill up a craft from 40 to 60", "compare gil/hour of farming A vs B"). When a question is like that, call escalate_to_planner with a one-line restatement of the goal INSTEAD of trying to answer it yourself — a more capable Moogle will take over the whole question. Do NOT escalate ordinary single-item or single-topic questions; handle those with the tools above.
+9. ffxi_zone_resolve: Correct the spelling of a zone name against the authoritative list of all FFXI zones. Whenever a user names a zone that looks misspelled, abbreviated, or that you're not 100% sure is spelled exactly as in-game (e.g. "Batalia Downs", "Whitgate", "sandoria"), call this FIRST — before ffxi_zone_map, ffxi_travel_lookup, or ffxi_wiki_search — and use the corrected name. If high_confidence is true, silently use "match" as the zone name (you may note the correction lightly, e.g. "(I think you mean Batallia Downs, kupo!)"). If high_confidence is false but there are suggestions, ask the user which zone they meant rather than guessing. If there's no match and no suggestions, it isn't a known FFXI zone — say so kindly. NOTE: ffxi_zone_map and ffxi_travel_lookup already auto-correct high-confidence typos internally, so you don't need to pre-resolve for those; use ffxi_zone_resolve when you want to confirm/repair a zone name for a wiki search or a free-form answer, or to offer "did you mean" choices.
+
+10. ffxi_reddit_search: LAST RESORT ONLY. Search the r/ffxi subreddit for community discussion. Use this ONLY after ffxi_wiki_search and search_notes have failed to answer, OR for inherently opinion/experience-based questions a wiki cannot cover (e.g. "what's the best solo job", "is this content still worth doing", subjective recommendations). The results are unverified player posts and opinions, NOT authoritative facts — never prefer Reddit over the wiki, and when you do use it, make clear you're relaying community opinion from r/ffxi rather than confirmed fact.
+
+11. escalate_to_planner: Use for COMPLEX, multi-step questions that a single lookup can't answer — ones that need cross-referencing several facts, arithmetic over looked-up values, or a chain of dependent lookups (e.g. "how many X fights for enough Y to finish the Z upgrade", "cheapest way to skill up a craft from 40 to 60", "compare gil/hour of farming A vs B"). When a question is like that, call escalate_to_planner with a one-line restatement of the goal INSTEAD of trying to answer it yourself — a more capable Moogle will take over the whole question. Do NOT escalate ordinary single-item or single-topic questions; handle those with the tools above.
 
 Some recent notes may already appear below; use search_notes to dig deeper into the full pool by keyword.
 
@@ -747,6 +845,8 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
             SEARCH_NOTES_TOOL,
             SAVE_NOTE_TOOL,
             FFXI_ZONE_MAP_TOOL,
+            FFXI_TRAVEL_LOOKUP_TOOL,
+            FFXI_ZONE_RESOLVE_TOOL,
             FFXI_REDDIT_SEARCH_TOOL,
         ]
         if include_escalate:
@@ -871,10 +971,35 @@ Follow the Slack formatting rules from above EXACTLY in your final answer: no Ma
             except Exception as e:
                 self.logger.error(f"save_note failed: {e}", exc_info=True)
                 return {"saved": False, "error": str(e)}
+        if name == "ffxi_travel_lookup":
+            ti = tool_input or {}
+            zone = (ti.get("zone") or "").strip()
+            destination = (ti.get("destination") or "").strip()
+            resource_type = (ti.get("resource_type") or "all").strip()
+            if not zone and not destination:
+                return {"found": False, "error": "Provide a zone and/or a destination."}
+            return travel_lookup(
+                zone=zone or None,
+                resource_type=resource_type,
+                destination=destination or None,
+            )
+        if name == "ffxi_zone_resolve":
+            zone = (tool_input or {}).get("zone", "").strip()
+            if not zone:
+                return {"match": None, "error": "zone is required"}
+            return resolve_zone(zone)
         if name == "ffxi_zone_map":
             zone_name = (tool_input or {}).get("zone_name", "").strip()
             if not zone_name:
                 return [{"text": "zone_name is required"}]
+            # Auto-correct a misspelled zone to its canonical BG-Wiki spelling
+            # before the fetch, so a typo doesn't just miss the wiki page.
+            zres = resolve_zone(zone_name)
+            if zres["match"] and zres["high_confidence"] and zres["corrected"]:
+                self.logger.info(
+                    f"ffxi_zone_map: corrected {zone_name!r} -> {zres['match']!r}"
+                )
+                zone_name = zres["match"]
             result = fetch_zone_maps(zone_name)
             if not result["found"]:
                 return [{"text": result.get("error", f"No maps found for '{zone_name}'")}]

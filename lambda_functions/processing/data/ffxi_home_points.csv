@@ -1,0 +1,123 @@
+Zone,HomePoint,Coordinates,Description
+Southern San d'Oria,#1,(G-10),(E) Near East Ronfaure zone / entrance to King Ranperre's Tomb area
+Southern San d'Oria,#2,(J-9),(A) Near Auction House / main plaza
+Southern San d'Oria,#3,(M-5),(M) Near Mog House exit / North gate
+Southern San d'Oria,#4,(E-8),Southwestern area of town
+Northern San d'Oria,#1,(E-8),(E) Southwest area near West Ronfaure zone
+Northern San d'Oria,#2,(J-7),Central northern district
+Northern San d'Oria,#3,(K-9),(M) Near Mog House / Cathedral area
+Northern San d'Oria,#4,(F-5),Northwestern part of town
+Port San d'Oria,#1,(G-9),Central area near La Vaule staging point
+Port San d'Oria,#2,(J-9),(M) Near Mog House exit
+Port San d'Oria,#3,(H-10),(A) Southern area near docks/Auction House
+Bastok Mines,#1,(I-8),(A) Near Auction House
+Bastok Mines,#2,(K-8),(M) Near Mog House exit
+Bastok Mines,#3,(K-7),Northern area of the Mines
+Bastok Markets,#1,(F-9),(E) Southwest near zone to South Gustaberg
+Bastok Markets,#2,(E-7),(A) Near Auction House
+Bastok Markets,#3,(I-6),(M) Near Mog House / north end of Markets
+Bastok Markets,#4,(I-8),Eastern side of Markets
+Port Bastok,#1,(J-7),(E) Near zone into Bastok Markets
+Port Bastok,#2,(J-13),(M) Near Mog House / lower southern area
+Port Bastok,#3,(E-6),Western docks/warehouse area
+Metalworks,#1,(I-8),Upstairs next to the Presidential Aide's Office
+Metalworks,#2,(F-8),Downstairs near the Smithing Guild
+Windurst Waters,#1,(G-7),(E) Waters North near zone to East Sarutabaruta
+Windurst Waters,#2,(K-11),(M) Waters North near Mog House exit
+Windurst Waters,#3,(J-8),Waters South
+Windurst Waters,#4,(E-9),Waters North (northwest section)
+Windurst Walls,#1,(F-7),Near Rhinostery / central Walls area
+Windurst Walls,#2,(C-12),(M) Near Mog House exit
+Windurst Walls,#3,(I-11),(A) Near Auction House / Heavens Tower entrance
+Port Windurst,#1,(C-7),Central Port area
+Port Windurst,#2,(B-4),(E) Near Shiva's Gate / zone to West Sarutabaruta
+Port Windurst,#3,(L-4),(M) Near Mog House exit
+Windurst Woods,#1,(H-9),Central Woods
+Windurst Woods,#2,(K-10),(E) Near zone to East Sarutabaruta
+Windurst Woods,#3,(F-7),(M) Near Mog House exit
+Windurst Woods,#4,(J-12),(A) Near Auction House
+Windurst Woods,#5,(G-13),Southern Woods area
+Ru'Lude Gardens,#1,(H-8),Central plaza
+Ru'Lude Gardens,#2,(I-9),(M) Near Mog House exit
+Ru'Lude Gardens,#3,(F-9),(A) Near Auction House (western wing)
+Upper Jeuno,#1,(F-5),(E) Near zone to Ru'Lude Gardens
+Upper Jeuno,#2,(I-11),(M) Near Mog House exit
+Upper Jeuno,#3,(G-9),(A) Near Infirmary/Auction House
+Lower Jeuno,#1,(G-11),(E) Near zone from Upper Jeuno
+Lower Jeuno,#2,(I-5),(M) Near Mog House exit / Auction House
+Port Jeuno,#1,(J-8),(E) Near zone to Qufim Island
+Port Jeuno,#2,(F-8),(M) Near Mog House exit / airship dock
+Kazham,#1,(I-9),Central Kazham near shops/zone points
+Mhaura,#1,(H-8),Near the docks/ferry
+Norg,#1,(H-9),Near the docks/entrance area
+Norg,#2,(E-6),Western part of Norg (Sea Serpent Grotto side)
+Rabao,#1,(F-10),Near main shops
+Rabao,#2,(G-6),Near the Veridical Conflux and shops (north side)
+Selbina,#1,(I-8),Near the ferry docks
+Western Adoulin,#1,(H-10),(M) Between Auction House and Mog House
+Western Adoulin,#2,(F-8),Near the Pioneers' Coalition / western district
+Eastern Adoulin,#1,(J-8),(E) Near zone into Western Adoulin
+Eastern Adoulin,#2,(H-11),Near Mog House / eastern district
+Ceizak Battlegrounds,#1,(H-6),At the Wildskeeper Reive battle entrance
+Foret de Hennetiel,#1,(F-10),At the Wildskeeper Reive battle entrance
+Morimar Basalt Fields,#1,(E-5),At the Wildskeeper Reive battle entrance
+Yorcia Weald,#1,(E-9),At the Wildskeeper Reive battle entrance
+Marjami Ravine,#1,(H-7),At the Wildskeeper Reive battle entrance
+Kamihr Drifts,#1,(I-7),At the Wildskeeper Reive battle entrance
+Yughott Grotto,#1,(J-6),Map 2 - near dungeon depths
+Palborough Mines,#1,(H-10),Map 3 - deep in the mines
+Giddeus,#1,(G-12),Map 1
+Fei'Yin,#1,(K-8),Map 1
+Fei'Yin,#2,(I-5),Entrance to Cloister of Frost
+Quicksand Caves,#1,(D-5),Map 4
+Quicksand Caves,#2,(C-8),Entrance to Cloister of Tremors
+Den of Rancor,#1,(E-4),Map 2 - entrance to Sacrificial Chamber
+Den of Rancor,#2,(I-8),Entrance to Cloister of Tides
+Castle Zvahl Keep,#1,(G-7),Map 4 - outside entrance to Throne Room
+Ru'Aun Gardens,#1,(H-4),North island - Ark Angel HM
+Ru'Aun Gardens,#2,(F-10),Southwest island - Ark Angel TT
+Ru'Aun Gardens,#3,(E-7),Northwest island - Ark Angel MR
+Ru'Aun Gardens,#4,(K-7),Northeast island - Ark Angel EV
+Ru'Aun Gardens,#5,(J-11),Southeast island - Ark Angel GK
+Tavnazian Safehold,#1,(I-6),Middle floor
+Tavnazian Safehold,#2,(H-8),Lower floor
+Tavnazian Safehold,#3,(J-7),Upper floor
+Aht Urhgan Whitegate,#1,(H-9),Middle of the area at the fountain
+Aht Urhgan Whitegate,#2,(L-9),Near Runic Portal and Survival Guide
+Aht Urhgan Whitegate,#3,(F-6),(A) Near Auction House
+Aht Urhgan Whitegate,#4,(F-10),(M) Near Mog House - quick way into Al Zahbi
+Nashmau,#1,(G-8),Next to docks and Survival Guide
+Al Zahbi,#1,(F-8),Central Al Zahbi (near shops/besieged staging)
+Southern San d'Oria [S],#1,(G-10),Near the Chocobo Stables (WotG zone)
+Bastok Markets [S],#1,(F-9),Southern area near zone (WotG zone)
+Windurst Waters [S],#1,(G-7),Central Waters (WotG zone)
+Upper Delkfutt's Tower,#1,(F-9),Entrance to Stellar Fulcrum (12th floor)
+The Shrine of Ru'Avitau,#1,(H-7),Map 1 - entrance to The Celestial Nexus
+Riverne - Site #B01,#1,(E-8),Near Monarch Linn (Bahamut battle staging)
+Bhaflau Thickets,#1,(I-9),In the tunnel near the Jade Sepulcher exit
+Caedarva Mire,#1,(E-9),Outside Talacca Cove
+Uleguerand Range,#1,(H-7),Entrance from Beaucedine Glacier area
+Uleguerand Range,#2,(J-9),Central Uleguerand
+Uleguerand Range,#3,(K-7),Near Falgosh Falls / Bearclaw Pinnacle
+Uleguerand Range,#4,(H-5),Northern section
+Uleguerand Range,#5,(G-9),Ejji-Boojii's Bell area
+Attohwa Chasm,#1,(G-6),Entrance to Boneyard Gully
+Pso'Xja,#1,(Map 8 - unmapped area),At entrance to The Shrouded Maw
+Newton Movalpolos,#1,(M-9),Central Newton Movalpolos
+Riverne - Site #A01,#1,(I-9),Near the Unstable Displacement for Ouryu Cometh
+Al'Taieu,#1,(H-4),Northern Al'Taieu
+Al'Taieu,#2,(E-6),Western Al'Taieu
+Al'Taieu,#3,(L-6),Eastern Al'Taieu
+Grand Palace of Hu'Xzoi,#1,(H-8),Central palace area
+The Garden of Ru'Hmet,#1,(H-9),Map 1
+Mount Zhayolm,#1,(D-8),Near Halvung / Alzadaal Undersea Ruins entrance
+Cape Teriggan,#1,(F-5),Entrance to Cloister of Gales
+The Boyahda Tree,#1,(J-12),Entrance to Cloister of Storms
+Ifrit's Cauldron,#1,(G-6),Entrance to Cloister of Flames
+Xarcabard [S],#1,(H-9),Near the Veridical Conflux (WotG zone)
+Leafallia,#1,(H-8),Central Leafallia
+Castle Zvahl Keep [S],#1,(G-7),Map 4 - outside Throne Room (S) (WotG zone)
+Qufim Island,#1,(G-7),Near the Undulating Confluence (Escha - Zi'Tah transport)
+Toraimarai Canal,#1,(F-5),Near exit to Inner Horutoto Ruins
+Ra'Kaznar Inner Court,#1,(unverified),Near Sinister Reign NPC / Ra'Kaznar Turris area
+Misareaux Coast,#1,(H-6),Near exits to Lufaise Meadows and Misareaux Coast
